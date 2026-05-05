@@ -11,10 +11,10 @@
         <el-button
           type="success"
           :loading="running"
-          :disabled="isFederatedLearningTask(taskDetail)"
+          :disabled="running"
           @click="handleRun"
         >
-          {{ isFederatedLearningTask(taskDetail) ? '第十五阶段开放' : '执行任务' }}
+          {{ isFederatedLearningTask(taskDetail) ? '执行 Mock 联邦训练' : '执行任务' }}
         </el-button>
       </div>
     </div>
@@ -292,12 +292,187 @@
     <el-alert
       v-if="isFederatedLearningTask(taskDetail)"
       class="section-card"
-      title="T2 联邦学习任务模板已预留"
-      type="warning"
-      description="当前任务已保存跨区县传染病时空预测与疫情溯源配置，参与方可继续复用当前任务参与方机制；真实训练将在第十五阶段接入 Mock 联邦训练闭环。"
+      title="Mock 联邦训练闭环已接入"
+      type="success"
+      description="当前联邦学习任务可以执行 Mock 联邦训练，执行后将生成训练轮次、准确率、损失值、AUC 等指标，并写入任务结果。"
       show-icon
       :closable="false"
     />
+    <el-card
+      v-if="isFederatedLearningTask(taskDetail)"
+      class="section-card"
+      shadow="never"
+    >
+      <template #header>
+        <div class="result-header">
+          <div class="card-title">联邦训练结果</div>
+
+          <div class="result-actions">
+            <el-button type="primary" plain @click="loadResult">
+              刷新结果
+            </el-button>
+
+            <el-button
+              type="warning"
+              plain
+              :loading="anchoring"
+              :disabled="!taskResult || taskDetail?.status !== 'success'"
+              @click="handleAnchorTaskResult"
+            >
+              结果存证
+            </el-button>
+          </div>
+        </div>
+      </template>
+
+      <template v-if="taskResult">
+        <div class="metric-grid">
+          <div class="metric-card">
+            <div class="metric-label">最终准确率</div>
+            <div class="metric-value">
+              {{ formatPercentNumber(federatedSummary.final_accuracy) }}
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">最终损失</div>
+            <div class="metric-value">
+              {{ formatDecimalNumber(federatedSummary.final_loss) }}
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">最终 AUC</div>
+            <div class="metric-value">
+              {{ formatDecimalNumber(federatedSummary.final_auc) }}
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">训练轮数</div>
+            <div class="metric-value">
+              {{ federatedSummary.round_count ?? '-' }}
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">参与节点数</div>
+            <div class="metric-value">
+              {{ federatedSummary.participant_count ?? '-' }}
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">样本数量</div>
+            <div class="metric-value">
+              {{ formatMetricNumber(federatedSummary.sample_count) }}
+            </div>
+          </div>
+        </div>
+
+        <el-descriptions class="result-desc" :column="2" border>
+          <el-descriptions-item label="任务场景">
+            {{ federatedResultJson.scenario_name || '-' }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="模型类型">
+            {{ federatedResultJson.model_type || '-' }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="执行框架">
+            {{ federatedResultJson.framework || '-' }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="隐私模式">
+            {{ federatedSummary.privacy_mode || '-' }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="原始数据导出">
+            {{ federatedSummary.raw_data_export === false ? '禁止' : '允许' }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="结果状态">
+            {{ taskResult.status || '-' }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="结果Hash" :span="2">
+            {{ taskResult.result_hash || '-' }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <el-alert
+          v-if="chainAnchorResult"
+          class="anchor-alert"
+          type="success"
+          show-icon
+          :closable="false"
+          :title="chainAnchorResult.duplicated ? '当前任务结果已完成存证' : 'Mock 任务结果存证成功'"
+        />
+
+        <el-descriptions
+          v-if="chainAnchorResult?.chain_record"
+          class="result-desc"
+          :column="2"
+          border
+        >
+          <el-descriptions-item label="存证状态">
+            {{ chainAnchorResult.chain_record.status || '-' }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="链类型">
+            {{ chainAnchorResult.chain_record.chain_type || '-' }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="区块高度">
+            {{ chainAnchorResult.chain_record.block_number || '-' }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="合约地址">
+            {{ chainAnchorResult.chain_record.contract_address || '-' }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="内容哈希" :span="2">
+            {{ chainAnchorResult.chain_record.content_hash || '-' }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="交易哈希" :span="2">
+            {{ chainAnchorResult.chain_record.tx_hash || '-' }}
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <el-divider content-position="left">训练轮次指标</el-divider>
+
+        <el-table
+          :data="federatedRounds"
+          border
+          size="small"
+          style="width: 100%"
+        >
+          <el-table-column prop="round" label="轮次" width="100" />
+          <el-table-column label="Loss" width="160">
+            <template #default="{ row }">
+              {{ formatDecimalNumber(row.loss) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="Accuracy" width="160">
+            <template #default="{ row }">
+              {{ formatPercentNumber(row.accuracy) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="AUC" width="160">
+            <template #default="{ row }">
+              {{ formatDecimalNumber(row.auc) }}
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <div class="json-title">原始训练结果 JSON</div>
+
+        <pre class="json-view">{{ formatJson(taskResult.result_json || taskResult.metrics_json || taskResult) }}</pre>
+      </template>
+
+      <el-empty v-else description="暂无联邦训练结果，请先执行 Mock 联邦训练" />
+    </el-card>
 
     <el-alert
       v-else
@@ -319,9 +494,22 @@
   <template #header>
     <div class="result-header">
       <div class="card-title">统计结果</div>
-      <el-button type="primary" plain @click="loadResult">
-        刷新结果
-      </el-button>
+
+      <div class="result-actions">
+        <el-button type="primary" plain @click="loadResult">
+          刷新结果
+        </el-button>
+
+        <el-button
+          type="warning"
+          plain
+          :loading="anchoring"
+          :disabled="!taskResult || taskDetail?.status !== 'success'"
+          @click="handleAnchorTaskResult"
+        >
+          结果存证
+        </el-button>
+      </div>
     </div>
   </template>
 
@@ -373,6 +561,47 @@
         {{ taskResult.created_at || '-' }}
       </el-descriptions-item>
     </el-descriptions>
+
+    <el-alert
+      v-if="chainAnchorResult"
+      class="anchor-alert"
+      type="success"
+      show-icon
+      :closable="false"
+      :title="chainAnchorResult.duplicated ? '当前任务结果已完成存证' : 'Mock 任务结果存证成功'"
+    />
+
+    <el-descriptions
+      v-if="chainAnchorResult?.chain_record"
+      class="result-desc"
+      :column="2"
+      border
+    >
+      <el-descriptions-item label="存证状态">
+        {{ chainAnchorResult.chain_record.status || '-' }}
+      </el-descriptions-item>
+
+      <el-descriptions-item label="链类型">
+        {{ chainAnchorResult.chain_record.chain_type || '-' }}
+      </el-descriptions-item>
+
+      <el-descriptions-item label="区块高度">
+        {{ chainAnchorResult.chain_record.block_number || '-' }}
+      </el-descriptions-item>
+
+      <el-descriptions-item label="合约地址">
+        {{ chainAnchorResult.chain_record.contract_address || '-' }}
+      </el-descriptions-item>
+
+      <el-descriptions-item label="内容哈希" :span="2">
+        {{ chainAnchorResult.chain_record.content_hash || '-' }}
+      </el-descriptions-item>
+
+      <el-descriptions-item label="交易哈希" :span="2">
+        {{ chainAnchorResult.chain_record.tx_hash || '-' }}
+      </el-descriptions-item>
+    </el-descriptions>
+
 
     <div class="json-title">原始结果 JSON</div>
 
@@ -493,6 +722,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import {
+  anchorTaskResult,
   createTaskParty,
   deleteTaskParty,
   getTaskDetail,
@@ -532,10 +762,12 @@ const taskId = route.params.id as string
 
 const loading = ref(false)
 const running = ref(false)
+const anchoring = ref(false)
 
 const taskDetail = ref<any>(null)
 const partyList = ref<any[]>([])
 const taskResult = ref<any>(null)
+const chainAnchorResult = ref<any>(null)
 
 const partyDialogVisible = ref(false)
 const creatingParty = ref(false)
@@ -703,19 +935,16 @@ async function handleCreateParty() {
 }
 
 async function handleRun() {
-  if (isFederatedLearningTask(taskDetail.value)) {
-    ElMessage.warning('联邦学习任务将在第十五阶段接入 Mock 联邦训练闭环')
-    return
-  }
+  const isFlTask = isFederatedLearningTask(taskDetail.value)
 
   if (!partyList.value.length) {
-    ElMessage.warning('请先配置任务参与方，再执行联合统计任务')
+    ElMessage.warning(isFlTask ? '请先配置训练节点，再执行 Mock 联邦训练' : '请先配置任务参与方，再执行联合统计任务')
     return
   }
 
   try {
     await ElMessageBox.confirm(
-      '确认执行当前联合统计任务吗？',
+      isFlTask ? '确认执行当前 Mock 联邦训练任务吗？' : '确认执行当前联合统计任务吗？',
       '执行确认',
       {
         type: 'warning',
@@ -725,9 +954,15 @@ async function handleRun() {
     )
 
     running.value = true
-    await runTask(taskId)
 
-    ElMessage.success('任务执行成功')
+    const res = await runTask(taskId)
+    const data = unwrapResponse(res)
+
+    if (data?.result) {
+      taskResult.value = data.result
+    }
+
+    ElMessage.success(isFlTask ? 'Mock 联邦训练执行成功' : '任务执行成功')
 
     await loadDetail()
     await loadParties()
@@ -735,10 +970,54 @@ async function handleRun() {
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error(error)
-      ElMessage.error('任务执行失败')
+      ElMessage.error(isFlTask ? 'Mock 联邦训练执行失败' : '任务执行失败')
     }
   } finally {
     running.value = false
+  }
+}
+
+async function handleAnchorTaskResult() {
+  if (!taskDetail.value || taskDetail.value.status !== 'success') {
+    ElMessage.warning('任务尚未成功完成，不能进行结果存证')
+    return
+  }
+
+  if (!taskResult.value) {
+    ElMessage.warning('当前任务暂无结果，请先执行任务并生成结果')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      '确认对当前任务结果进行 Mock 链上存证吗？当前阶段仅写入本地 chain_record，不调用真实 FISCO BCOS。',
+      '结果存证确认',
+      {
+        type: 'warning',
+        confirmButtonText: '存证',
+        cancelButtonText: '取消',
+      },
+    )
+
+    anchoring.value = true
+
+    const res = await anchorTaskResult(taskId)
+    const data = unwrapResponse(res)
+
+    chainAnchorResult.value = data
+
+    if (data?.duplicated) {
+      ElMessage.info(data.message || '当前任务结果已完成存证，无需重复存证')
+    } else {
+      ElMessage.success(data?.message || 'Mock 任务结果存证成功')
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error(error)
+      ElMessage.error('结果存证失败')
+    }
+  } finally {
+    anchoring.value = false
   }
 }
 
@@ -873,6 +1152,20 @@ const resultMetrics = computed(() => {
   }
 })
 
+
+const federatedResultJson = computed(() => {
+  return parseJsonValue(taskResult.value?.result_json)
+})
+
+const federatedSummary = computed(() => {
+  return federatedResultJson.value?.summary || {}
+})
+
+const federatedRounds = computed(() => {
+  const rounds = federatedResultJson.value?.rounds
+  return Array.isArray(rounds) ? rounds : []
+})
+
 function formatMetricNumber(value: any) {
   if (value === null || value === undefined || value === '') return '-'
   return Number(value).toLocaleString()
@@ -893,12 +1186,35 @@ function formatRate(value: any) {
 }
 
 
+function formatDecimalNumber(value: any, digits = 4) {
+  if (value === null || value === undefined || value === '') return '-'
+
+  const num = Number(value)
+  if (Number.isNaN(num)) return '-'
+
+  return num.toFixed(digits).replace(/\.?0+$/, '')
+}
+
+function formatPercentNumber(value: any) {
+  if (value === null || value === undefined || value === '') return '-'
+
+  const num = Number(value)
+  if (Number.isNaN(num)) return '-'
+
+  if (num <= 1) {
+    return `${(num * 100).toFixed(2)}%`
+  }
+
+  return `${num.toFixed(2)}%`
+}
+
+
 
 onMounted(async () => {
   await loadDetail()
   await loadParties()
 
-  if (route.query.tab === 'result' && !isFederatedLearningTask(taskDetail.value)) {
+  if (route.query.tab === 'result' || taskDetail.value?.status === 'success') {
     await loadResult()
   }
 })
@@ -1114,6 +1430,16 @@ onMounted(async () => {
 }
 
 .json-collapse {
+  margin-top: 16px;
+}
+
+.result-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.anchor-alert {
   margin-top: 16px;
 }
 

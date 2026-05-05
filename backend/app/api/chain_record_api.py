@@ -78,34 +78,36 @@ def get_chain_record(
     }
 
 
-@router.post("/api/tasks/{task_id}/chain-anchor")
-def anchor_task(
-    task_id: int,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    """
-    对任务进行 Mock 链上存证
-    """
-    task = task_service.get_task_or_404(
-        db=db,
-        task_id=task_id,
-    )
+# @router.post("/api/tasks/{task_id}/chain-anchor")
+# def anchor_task(
+#     task_id: int,
+#     db: Session = Depends(get_db),
+#     current_user=Depends(get_current_user),
+# ):
+#     """
+#     对任务进行 Mock 链上存证
+#     """
+#     task = task_service.get_task_or_404(
+#         db=db,
+#         task_id=task_id,
+#     )
+#
+#     task_content = task_service.task_to_dict(task)
+#
+#     record = ChainRecordService.mock_anchor_content(
+#         db=db,
+#         biz_type="task",
+#         biz_id=str(task_id),
+#         content=task_content,
+#     )
+#
+#     return {
+#         "code": 0,
+#         "message": "success",
+#         "data": ChainRecordService.build_record_info(record),
+#     }
 
-    task_content = task_service.task_to_dict(task)
 
-    record = ChainRecordService.mock_anchor_content(
-        db=db,
-        biz_type="task",
-        biz_id=str(task_id),
-        content=task_content,
-    )
-
-    return {
-        "code": 0,
-        "message": "success",
-        "data": ChainRecordService.build_record_info(record),
-    }
 
 
 @router.post("/api/task-results/{result_id}/chain-anchor")

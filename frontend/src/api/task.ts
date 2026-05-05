@@ -60,6 +60,10 @@ export function getTaskResult(taskId: number | string) {
   return request.get(`/api/tasks/${taskId}/result`)
 }
 
+export function anchorTaskResult(taskId: number | string) {
+  return request.post(`/api/tasks/${taskId}/chain-anchor`)
+}
+
 export function getTaskParties(taskId: number | string) {
   return request.get(`/api/tasks/${taskId}/parties`)
 }

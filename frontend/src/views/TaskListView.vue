@@ -595,13 +595,10 @@ function goDetail(taskId: number | string) {
 }
 
 async function handleRun(row: any) {
-  if (isFederatedLearningTask(row)) {
-    ElMessage.warning('联邦学习任务执行能力待开发')
-    return
-  }
+  const isFlTask = isFederatedLearningTask(row)
 
   if (row.status === 'success') {
-    ElMessage.info('该任务已执行成功，如需重新执行请先调整任务状态')
+    ElMessage.info(isFlTask ? '该联邦学习任务已训练完成，可查看训练结果' : '该任务已执行成功，如需重新执行请先调整任务状态')
     return
   }
 
@@ -612,7 +609,9 @@ async function handleRun(row: any) {
 
   try {
     await ElMessageBox.confirm(
-      `确认执行任务「${row.task_name || row.task_code}」吗？`,
+      isFlTask
+        ? `确认执行 Mock 联邦训练任务「${row.task_name || row.task_code}」吗？`
+        : `确认执行任务「${row.task_name || row.task_code}」吗？`,
       '执行确认',
       {
         type: 'warning',
@@ -625,13 +624,13 @@ async function handleRun(row: any) {
 
     await runTask(row.id)
 
-    ElMessage.success('任务执行成功')
+    ElMessage.success(isFlTask ? 'Mock 联邦训练执行成功' : '任务执行成功')
 
     await loadTasks()
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error(error)
-      ElMessage.error('任务执行失败，请检查任务参与方配置')
+      ElMessage.error(isFlTask ? 'Mock 联邦训练执行失败，请检查训练节点配置' : '任务执行失败，请检查任务参与方配置')
     }
   } finally {
     runningTaskId.value = null
@@ -640,13 +639,10 @@ async function handleRun(row: any) {
 
 
 async function goResult(row: any) {
-  if (isFederatedLearningTask(row)) {
-    ElMessage.warning('联邦学习任务结果展示待开发')
-    return
-  }
+  const isFlTask = isFederatedLearningTask(row)
 
   if (row.status !== 'success') {
-    ElMessage.warning('当前任务暂无统计结果，请先执行任务')
+    ElMessage.warning(isFlTask ? '当前任务暂无训练结果，请先执行 Mock 联邦训练' : '当前任务暂无统计结果，请先执行任务')
     return
   }
 
@@ -655,7 +651,7 @@ async function goResult(row: any) {
     router.push(`/tasks/${row.id}?tab=result`)
   } catch (error) {
     console.error(error)
-    ElMessage.warning('当前任务暂无统计结果，请先执行任务')
+    ElMessage.warning(isFlTask ? '当前任务暂无训练结果，请先执行 Mock 联邦训练' : '当前任务暂无统计结果，请先执行任务')
   }
 }
 
@@ -686,17 +682,18 @@ function getStatusType(status: string) {
 }
 
 function canRunTask(row: any) {
-  if (isFederatedLearningTask(row)) return false
   return ['created', 'pending', 'failed'].includes(row.status)
 }
 
 function getRunButtonText(row: any) {
-  if (isFederatedLearningTask(row)) return '待开发'
+  const isFlTask = isFederatedLearningTask(row)
+
   if (runningTaskId.value === row.id) return '执行中'
-  if (row.status === 'success') return '已执行'
+  if (row.status === 'success') return isFlTask ? '已训练' : '已执行'
   if (row.status === 'running') return '执行中'
-  if (row.status === 'failed') return '重新执行'
-  return '执行'
+  if (row.status === 'failed') return isFlTask ? '重新训练' : '重新执行'
+
+  return isFlTask ? '执行训练' : '执行'
 }
 
 

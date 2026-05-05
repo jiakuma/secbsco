@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from datetime import datetime
+from typing import Any
+
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.task import Task
 from app.models.task_party import TaskParty
+from app.models.task_result import TaskResult
 from app.schemas.task_schema import (
     TaskCreate,
     TaskUpdate,
@@ -16,6 +22,34 @@ from app.schemas.task_schema import (
 
 def _model_dump(schema):
     return schema.model_dump(exclude_unset=True)
+
+
+def _safe_load_json(value: Any) -> dict:
+    """
+    兼容 params_json 可能是 dict 或 str 的情况。
+    """
+    if value is None:
+        return {}
+
+    if isinstance(value, dict):
+        return value
+
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except Exception:
+            return {}
+
+    return {}
+
+
+def _get_task_type(task: Task) -> str:
+    """
+    从 task.params_json 中识别任务类型。
+    历史任务默认按联合统计处理。
+    """
+    params = _safe_load_json(getattr(task, "params_json", None))
+    return params.get("task_type") or "statistic"
 
 
 def task_to_dict(task: Task) -> dict:
@@ -247,11 +281,27 @@ def delete_task_party(db: Session, task_id: int, party_id: int) -> dict:
 
 
 def mock_run_task(db: Session, task_id: int) -> dict:
+    """
+    任务执行统一入口：
+    - statistic：原 Mock 联合统计
+    - federated_learning：Mock 联邦训练
+    """
     task = get_task_or_404(db, task_id)
+    task_type = _get_task_type(task)
 
+    if task_type == "federated_learning":
+        return _mock_run_federated_learning_task(db=db, task=task)
+
+    return _mock_run_statistic_task(db=db, task=task)
+
+
+def _mock_run_statistic_task(db: Session, task: Task) -> dict:
+    """
+    原有 Mock 联合统计任务执行逻辑。
+    """
     parties = (
         db.query(TaskParty)
-        .filter(TaskParty.task_id == task_id)
+        .filter(TaskParty.task_id == task.id)
         .order_by(TaskParty.id.asc())
         .all()
     )
@@ -277,4 +327,151 @@ def mock_run_task(db: Session, task_id: int) -> dict:
         "task": task_to_dict(task),
         "parties": [party_to_dict(party) for party in parties],
         "message": "Mock 联合统计任务执行成功",
+    }
+
+
+def _mock_run_federated_learning_task(db: Session, task: Task) -> dict:
+    """
+    Mock 联邦学习训练任务执行逻辑。
+    当前阶段不接入真实 Flower / SecretFlow，只生成模拟训练轮次和指标。
+    """
+    params = _safe_load_json(getattr(task, "params_json", None))
+
+    parties = (
+        db.query(TaskParty)
+        .filter(TaskParty.task_id == task.id)
+        .order_by(TaskParty.id.asc())
+        .all()
+    )
+
+    if not parties:
+        raise HTTPException(
+            status_code=400,
+            detail="当前联邦学习任务尚未配置训练节点，无法执行",
+        )
+
+    task.status = "running"
+    for party in parties:
+        party.status = "running"
+        party.error_message = None
+
+    db.commit()
+
+    train_config = params.get("train_config") or {}
+    epochs = int(train_config.get("epochs") or 5)
+
+    scenario_code = params.get("scenario_code") or "infectious_spatiotemporal_prediction"
+    scenario_name = params.get("scenario_name") or "跨区县传染病时空预测与疫情溯源"
+    model_type = params.get("model_type") or "mock_spatiotemporal_model"
+    framework = params.get("framework") or "mock"
+
+    rounds = []
+    base_loss = 0.72
+    base_accuracy = 0.68
+    base_auc = 0.72
+
+    for i in range(1, epochs + 1):
+        loss = round(max(0.18, base_loss - i * 0.08), 4)
+        accuracy = round(min(0.95, base_accuracy + i * 0.042), 4)
+        auc = round(min(0.97, base_auc + i * 0.04), 4)
+
+        rounds.append(
+            {
+                "round": i,
+                "loss": loss,
+                "accuracy": accuracy,
+                "auc": auc,
+            }
+        )
+
+    final_round = rounds[-1]
+    participant_count = len(parties)
+
+    result_json = {
+        "task_type": "federated_learning",
+        "scenario_code": scenario_code,
+        "scenario_name": scenario_name,
+        "model_type": model_type,
+        "framework": framework,
+        "rounds": rounds,
+        "summary": {
+            "final_accuracy": final_round["accuracy"],
+            "final_loss": final_round["loss"],
+            "final_auc": final_round["auc"],
+            "round_count": epochs,
+            "participant_count": participant_count,
+            "sample_count": participant_count * 925,
+            "privacy_mode": "secure_aggregation",
+            "raw_data_export": False,
+        },
+    }
+
+    metrics_json = {
+        "final_accuracy": final_round["accuracy"],
+        "final_loss": final_round["loss"],
+        "final_auc": final_round["auc"],
+        "round_count": epochs,
+        "participant_count": participant_count,
+    }
+
+    result_hash = hashlib.sha256(
+        json.dumps(result_json, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+    task_result = (
+        db.query(TaskResult)
+        .filter(TaskResult.task_id == task.id)
+        .first()
+    )
+
+    now = datetime.now()
+
+    if task_result:
+        task_result.result_json = result_json
+        task_result.metrics_json = metrics_json
+        task_result.result_hash = result_hash
+        task_result.status = "success"
+        task_result.error_message = None
+
+        if hasattr(task_result, "updated_at"):
+            task_result.updated_at = now
+    else:
+        task_result = TaskResult(
+            task_id=task.id,
+            result_json=result_json,
+            metrics_json=metrics_json,
+            result_hash=result_hash,
+            status="success",
+            error_message=None,
+        )
+        db.add(task_result)
+
+    task.status = "success"
+
+    for party in parties:
+        party.status = "success"
+        party.error_message = None
+
+    if hasattr(task, "updated_at"):
+        task.updated_at = now
+
+    db.commit()
+    db.refresh(task)
+    db.refresh(task_result)
+
+    return {
+        "task": task_to_dict(task),
+        "parties": [party_to_dict(party) for party in parties],
+        "result": {
+            "id": task_result.id,
+            "task_id": task_result.task_id,
+            "result_json": task_result.result_json,
+            "metrics_json": task_result.metrics_json,
+            "result_hash": task_result.result_hash,
+            "status": task_result.status,
+            "error_message": task_result.error_message,
+            "created_at": task_result.created_at,
+            "updated_at": task_result.updated_at,
+        },
+        "message": "Mock 联邦学习训练任务执行成功",
     }
