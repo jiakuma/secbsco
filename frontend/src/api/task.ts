@@ -5,6 +5,8 @@ export interface TaskQueryParams {
   page_size?: number
   keyword?: string
   status?: string
+  task_type?: string
+  scenario_code?: string
 }
 
 export interface CreateTaskPayload {

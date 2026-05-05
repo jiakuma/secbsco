@@ -55,7 +55,7 @@
       </header>
 
       <section class="layout-body">
-        <router-view />
+        <router-view :key="route.fullPath" />
       </section>
     </main>
   </div>

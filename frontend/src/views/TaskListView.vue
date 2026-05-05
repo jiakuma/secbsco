@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>任务中心</h2>
-        <p>统一管理联合统计任务，并为后续联邦学习任务预留入口</p>
+        <p>统一管理联合统计任务和联邦学习任务模板</p>
       </div>
 
       <div class="header-actions">
@@ -45,8 +45,28 @@
             clearable
             style="width: 160px"
           >
-            <el-option label="联合统计" value="statistic" />
-            <el-option label="联邦学习" value="federated_learning" />
+            <el-option
+              v-for="item in TASK_TYPE_OPTIONS"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="任务场景">
+          <el-select
+            v-model="queryForm.scenario_code"
+            placeholder="全部场景"
+            clearable
+            style="width: 260px"
+          >
+            <el-option
+              v-for="item in TASK_SCENARIO_OPTIONS"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
         </el-form-item>
 
@@ -73,6 +93,12 @@
             <el-tag :type="getTaskTypeTagType(row)">
               {{ getTaskTypeText(row) }}
             </el-tag>
+          </template>
+        </el-table-column>
+
+        <el-table-column label="任务场景" min-width="220">
+          <template #default="{ row }">
+            {{ getTaskScenarioText(row) }}
           </template>
         </el-table-column>
 
@@ -153,16 +179,47 @@
             v-model="createForm.task_type"
             placeholder="请选择任务类型"
             style="width: 100%"
+            @change="handleTaskTypeChange"
           >
-            <el-option label="联合统计" value="statistic" />
-            <el-option label="联邦学习（待开发）" value="federated_learning" disabled />
+            <el-option
+              v-for="item in TASK_TYPE_OPTIONS"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
           </el-select>
           <div class="form-tip">
-            当前阶段先支持联合统计；联邦学习将在任务模型设计完成后开放。
+            第十四阶段已开放 T2 联邦学习任务模板；当前仅保存配置，第十五阶段再接入 Mock 联邦训练。
           </div>
         </el-form-item>
 
-        <el-form-item label="统计模板" prop="template_id">
+        <el-form-item
+          v-if="createForm.task_type === 'federated_learning'"
+          label="任务场景"
+          prop="scenario_code"
+        >
+          <el-select
+            v-model="createForm.scenario_code"
+            placeholder="请选择任务场景"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="item in TASK_SCENARIO_OPTIONS"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+          <div class="form-tip">
+            基于各区县本地脱敏个案数据开展横向联邦学习，并预留隐私求交溯源配置。
+          </div>
+        </el-form-item>
+
+        <el-form-item
+          v-if="createForm.task_type === 'statistic'"
+          label="统计模板"
+          prop="template_id"
+        >
           <el-select
             v-model="createForm.template_id"
             placeholder="请选择统计模板"
@@ -198,7 +255,7 @@
           </el-select>
         </el-form-item>
 
-        <el-form-item label="统计时间范围">
+        <el-form-item v-if="createForm.task_type === 'statistic'" label="统计时间范围">
           <el-date-picker
             v-model="statRange"
             type="datetimerange"
@@ -207,6 +264,17 @@
             value-format="YYYY-MM-DD HH:mm:ss"
             style="width: 100%"
           />
+        </el-form-item>
+
+        <el-form-item v-if="createForm.task_type === 'federated_learning'" label="模板配置">
+          <div class="fl-template-box">
+            <div class="fl-template-title">T2 联邦学习配置预览</div>
+            <div class="fl-template-line">联邦模式：横向联邦学习</div>
+            <div class="fl-template-line">模型类型：时空预测 Mock 模型</div>
+            <div class="fl-template-line">主表：IDSR_INDIVIDUAL_DIS</div>
+            <div class="fl-template-line">溯源表：SPATIOTEMPORAL_TRACE</div>
+            <div class="fl-template-line">隐私配置：不导出原始数据，启用安全聚合与区块链审计</div>
+          </div>
         </el-form-item>
 
         <el-form-item label="任务描述">
@@ -242,8 +310,19 @@ import {
   runTask,
   type CreateTaskPayload,
 } from '@/api/task'
-
-type TaskType = 'statistic' | 'federated_learning'
+import {
+  buildTaskParamsJson,
+  isFederatedLearningTask,
+  getTaskScenarioCodeFromRow as getTaskScenarioCode,
+  getTaskScenarioTextFromRow as getTaskScenarioText,
+  getTaskTypeFromRow as getTaskType,
+  getTaskTypeTagTypeFromRow as getTaskTypeTagType,
+  getTaskTypeTextFromRow as getTaskTypeText,
+  TASK_SCENARIO_OPTIONS,
+  TASK_TYPE_OPTIONS,
+  type ScenarioCode,
+  type TaskType,
+} from '@/constants/taskScenario'
 
 const router = useRouter()
 
@@ -266,6 +345,7 @@ const queryForm = reactive({
   keyword: '',
   status: '',
   task_type: '',
+  scenario_code: '',
 })
 
 const createDialogVisible = ref(false)
@@ -273,10 +353,11 @@ const createFormRef = ref<FormInstance>()
 
 const statRange = ref<string[]>([])
 
-const createForm = reactive<CreateTaskPayload & { task_type: TaskType }>({
+const createForm = reactive<CreateTaskPayload & { task_type: TaskType; scenario_code: ScenarioCode }>({
   task_code: '',
   task_name: '',
   task_type: 'statistic',
+  scenario_code: 'infectious_spatiotemporal_prediction',
   template_id: null,
   creator_agency_id: null,
   stat_start_time: '',
@@ -288,52 +369,12 @@ const createRules: FormRules = {
   task_code: [{ required: true, message: '请输入任务编号', trigger: 'blur' }],
   task_name: [{ required: true, message: '请输入任务名称', trigger: 'blur' }],
   task_type: [{ required: true, message: '请选择任务类型', trigger: 'change' }],
-  template_id: [{ required: true, message: '请选择统计模板', trigger: 'change' }],
+  scenario_code: [{ required: true, message: '请选择任务场景', trigger: 'change' }],
   creator_agency_id: [{ required: true, message: '请选择创建机构', trigger: 'change' }],
 }
 
 function unwrapResponse(res: any) {
   return res?.data?.data ?? res?.data ?? res
-}
-
-function parseJsonObject(value: any) {
-  if (!value) return {}
-
-  if (typeof value === 'string') {
-    try {
-      return JSON.parse(value)
-    } catch {
-      return {}
-    }
-  }
-
-  if (typeof value === 'object') {
-    return value
-  }
-
-  return {}
-}
-
-function getTaskType(row: any): TaskType {
-  const paramsJson = parseJsonObject(row?.params_json)
-  return (row?.task_type || paramsJson.task_type || 'statistic') as TaskType
-}
-
-function getTaskTypeText(row: any) {
-  const map: Record<TaskType, string> = {
-    statistic: '联合统计',
-    federated_learning: '联邦学习',
-  }
-
-  return map[getTaskType(row)] || '联合统计'
-}
-
-function getTaskTypeTagType(row: any) {
-  return getTaskType(row) === 'federated_learning' ? 'warning' : 'success'
-}
-
-function isFederatedLearningTask(row: any) {
-  return getTaskType(row) === 'federated_learning'
 }
 
 function normalizeList(payload: any) {
@@ -373,11 +414,11 @@ function normalizeList(payload: any) {
 
 
 const filteredTaskList = computed(() => {
-  if (!queryForm.task_type) {
-    return taskList.value
-  }
-
-  return taskList.value.filter((item) => getTaskType(item) === queryForm.task_type)
+  return taskList.value.filter((item) => {
+    const matchedType = !queryForm.task_type || getTaskType(item) === queryForm.task_type
+    const matchedScenario = !queryForm.scenario_code || getTaskScenarioCode(item) === queryForm.scenario_code
+    return matchedType && matchedScenario
+  })
 })
 
 async function loadAgencyOptions() {
@@ -451,6 +492,7 @@ function resetQuery() {
   queryForm.keyword = ''
   queryForm.status = ''
   queryForm.task_type = ''
+  queryForm.scenario_code = ''
   loadTasks()
 }
 
@@ -460,6 +502,7 @@ async function openCreateDialog() {
   createForm.task_code = `FLU_TASK_${Date.now()}`
   createForm.task_name = ''
   createForm.task_type = 'statistic'
+  createForm.scenario_code = 'infectious_spatiotemporal_prediction'
   createForm.template_id = null
   createForm.creator_agency_id = null
   createForm.stat_start_time = ''
@@ -473,14 +516,39 @@ async function openCreateDialog() {
   ])
 }
 
+function handleTaskTypeChange() {
+  if (createForm.task_type === 'federated_learning') {
+    createForm.scenario_code = 'infectious_spatiotemporal_prediction'
+    createForm.template_id = null
+    statRange.value = []
+    if (!createForm.task_name) {
+      createForm.task_name = 'T2 跨区县传染病时空预测与疫情溯源任务'
+    }
+    if (createForm.task_code.startsWith('FLU_TASK_')) {
+      createForm.task_code = `FED_TASK_${Date.now()}`
+    }
+  }
+
+  if (createForm.task_type === 'statistic') {
+    if (createForm.task_code.startsWith('FED_TASK_')) {
+      createForm.task_code = `FLU_TASK_${Date.now()}`
+    }
+  }
+}
+
 async function handleCreate() {
   if (!createFormRef.value) return
 
   await createFormRef.value.validate(async (valid) => {
     if (!valid) return
 
-    if (!createForm.template_id) {
+    if (createForm.task_type === 'statistic' && !createForm.template_id) {
       ElMessage.warning('请选择统计模板')
+      return
+    }
+
+    if (createForm.task_type === 'federated_learning' && !createForm.scenario_code) {
+      ElMessage.warning('请选择联邦学习任务场景')
       return
     }
 
@@ -492,17 +560,20 @@ async function handleCreate() {
     creating.value = true
 
     try {
+      const isFederated = createForm.task_type === 'federated_learning'
+
       const payload: CreateTaskPayload = {
         task_code: createForm.task_code,
         task_name: createForm.task_name,
-        template_id: createForm.template_id,
+        template_id: isFederated ? null : createForm.template_id,
         creator_agency_id: createForm.creator_agency_id,
         description: createForm.description || undefined,
-        stat_start_time: statRange.value?.[0] || undefined,
-        stat_end_time: statRange.value?.[1] || undefined,
-        params_json: {
-          task_type: createForm.task_type,
-        },
+        stat_start_time: isFederated ? undefined : statRange.value?.[0] || undefined,
+        stat_end_time: isFederated ? undefined : statRange.value?.[1] || undefined,
+        params_json: buildTaskParamsJson(
+          createForm.task_type,
+          isFederated ? createForm.scenario_code : undefined,
+        ),
       }
 
       await createTask(payload)
@@ -512,7 +583,7 @@ async function handleCreate() {
       await loadTasks()
     } catch (error) {
       console.error(error)
-      ElMessage.error('任务创建失败，请检查统计模板、创建机构和任务编号是否有效')
+      ElMessage.error('任务创建失败，请检查任务编号、创建机构和任务配置是否有效')
     } finally {
       creating.value = false
     }
@@ -675,6 +746,27 @@ onMounted(() => {
   color: #8c96a8;
   font-size: 12px;
   line-height: 1.4;
+}
+
+.fl-template-box {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #dcdfe6;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.fl-template-title {
+  margin-bottom: 6px;
+  font-weight: 600;
+  color: #1f2d3d;
+}
+
+.fl-template-line {
+  word-break: break-all;
 }
 
 .pagination-wrapper {
