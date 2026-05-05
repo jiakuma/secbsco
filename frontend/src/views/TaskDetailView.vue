@@ -67,22 +67,27 @@
         </el-descriptions-item>
       </el-descriptions>
     </el-card>
-
     <el-card class="section-card" shadow="never">
-    <template #header>
-      <div class="result-header">
-        <div class="card-title">参与方信息</div>
-        <el-button type="primary" plain @click="openPartyDialog">
-          新增参与方
-        </el-button>
-      </div>
-    </template>
+      <template #header>
+        <div class="result-header">
+          <div class="card-title">参与方信息</div>
+          <el-button
+            type="primary"
+            plain
+            @click="openPartyDialog"
+          >
+            新增参与方
+          </el-button>
+        </div>
+      </template>
 
       <el-table :data="partyList" border style="width: 100%">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="agency_id" label="机构ID" width="120" />
         <el-table-column prop="node_id" label="节点ID" width="120" />
-        <el-table-column prop="dataset_id" label="数据集ID" width="120" />
+        <el-table-column prop="dataset_id" label="数据资源ID" width="130" />
+        <el-table-column prop="party_role" label="参与角色" width="140" />
+
         <el-table-column prop="status" label="状态" width="120">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">
@@ -90,48 +95,90 @@
             </el-tag>
           </template>
         </el-table-column>
+
         <el-table-column prop="created_at" label="创建时间" min-width="170" />
+
+        <el-table-column label="操作" width="120" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              link
+              type="danger"
+              @click="handleDeleteParty(row)"
+            >
+              删除
+            </el-button>
+          </template>
+        </el-table-column>
       </el-table>
 
       <el-empty v-if="!partyList.length" description="暂无参与方数据" />
     </el-card>
-
     <el-card class="section-card" shadow="never">
-      <template #header>
-        <div class="result-header">
-          <div class="card-title">统计结果</div>
-          <el-button type="primary" plain @click="loadResult">
-            刷新结果
-          </el-button>
+  <template #header>
+    <div class="result-header">
+      <div class="card-title">统计结果</div>
+      <el-button type="primary" plain @click="loadResult">
+        刷新结果
+      </el-button>
+    </div>
+  </template>
+
+  <template v-if="taskResult">
+    <div class="metric-grid">
+      <div class="metric-card">
+        <div class="metric-label">病例数</div>
+        <div class="metric-value">
+          {{ formatMetricNumber(resultMetrics.case_count) }}
         </div>
-      </template>
+      </div>
 
-      <template v-if="taskResult">
-        <el-descriptions :column="2" border>
-          <el-descriptions-item label="结果ID">
-            {{ taskResult.id || '-' }}
-          </el-descriptions-item>
+      <div class="metric-card">
+        <div class="metric-label">去重人数</div>
+        <div class="metric-value">
+          {{ formatMetricNumber(resultMetrics.unique_patient_count) }}
+        </div>
+      </div>
 
-          <el-descriptions-item label="结果状态">
-            {{ taskResult.status || '-' }}
-          </el-descriptions-item>
+      <div class="metric-card">
+        <div class="metric-label">阳性数</div>
+        <div class="metric-value">
+          {{ formatMetricNumber(resultMetrics.positive_count) }}
+        </div>
+      </div>
 
-          <el-descriptions-item label="结果Hash">
-            {{ taskResult.result_hash || '-' }}
-          </el-descriptions-item>
+      <div class="metric-card">
+        <div class="metric-label">阳性率</div>
+        <div class="metric-value">
+          {{ formatRate(resultMetrics.positive_rate) }}
+        </div>
+      </div>
+    </div>
 
-          <el-descriptions-item label="创建时间">
-            {{ taskResult.created_at || '-' }}
-          </el-descriptions-item>
-        </el-descriptions>
+    <el-descriptions class="result-desc" :column="2" border>
+      <el-descriptions-item label="结果ID">
+        {{ taskResult.id || '-' }}
+      </el-descriptions-item>
 
-        <div class="json-title">结果内容</div>
+      <el-descriptions-item label="结果状态">
+        {{ taskResult.status || '-' }}
+      </el-descriptions-item>
 
-        <pre class="json-view">{{ formatJson(taskResult.result_json || taskResult.metrics_json || taskResult) }}</pre>
-      </template>
+      <el-descriptions-item label="结果Hash">
+        {{ taskResult.result_hash || '-' }}
+      </el-descriptions-item>
 
-      <el-empty v-else description="暂无统计结果，请先执行任务" />
-    </el-card>
+      <el-descriptions-item label="创建时间">
+        {{ taskResult.created_at || '-' }}
+      </el-descriptions-item>
+    </el-descriptions>
+
+    <div class="json-title">原始结果 JSON</div>
+
+    <pre class="json-view">{{ formatJson(taskResult.result_json || taskResult.metrics_json || taskResult) }}</pre>
+  </template>
+
+  <el-empty v-else description="暂无统计结果，请先执行任务" />
+</el-card>
   </div>
   <el-dialog
   v-model="partyDialogVisible"
@@ -145,18 +192,60 @@
     :rules="partyRules"
     label-width="120px"
   >
-    <el-form-item label="机构ID" prop="agency_id">
-      <el-input-number v-model="partyForm.agency_id" :min="1" style="width: 100%" />
-    </el-form-item>
+<el-form-item label="参与机构" prop="agency_id">
+  <el-select
+    v-model="partyForm.agency_id"
+    placeholder="请选择参与机构"
+    filterable
+    clearable
+    style="width: 100%"
+    :loading="resourceLoading"
+    @change="handleAgencyChange"
+  >
+    <el-option
+      v-for="item in agencyOptions"
+      :key="item.id"
+      :label="item.agency_name || item.name || item.agency_code || `机构${item.id}`"
+      :value="item.id"
+    />
+  </el-select>
+</el-form-item>
 
-    <el-form-item label="节点ID" prop="node_id">
-      <el-input-number v-model="partyForm.node_id" :min="1" style="width: 100%" />
-    </el-form-item>
+<el-form-item label="参与节点" prop="node_id">
+  <el-select
+    v-model="partyForm.node_id"
+    placeholder="请选择参与节点"
+    filterable
+    clearable
+    style="width: 100%"
+    :loading="resourceLoading"
+  >
+    <el-option
+      v-for="item in filteredNodeOptions"
+      :key="item.id"
+      :label="item.node_name || item.name || item.node_code || `节点${item.id}`"
+      :value="item.id"
+    />
+  </el-select>
+</el-form-item>
 
-    <el-form-item label="数据资源ID" prop="dataset_id">
-      <el-input-number v-model="partyForm.dataset_id" :min="1" style="width: 100%" />
-    </el-form-item>
-
+<el-form-item label="数据资源" prop="dataset_id">
+  <el-select
+    v-model="partyForm.dataset_id"
+    placeholder="请选择本地数据资源"
+    filterable
+    clearable
+    style="width: 100%"
+    :loading="resourceLoading"
+  >
+    <el-option
+      v-for="item in filteredDatasetOptions"
+      :key="item.id"
+      :label="item.dataset_name || item.name || item.dataset_code || `数据资源${item.id}`"
+      :value="item.id"
+    />
+  </el-select>
+</el-form-item>
     <el-form-item label="参与角色">
       <el-select v-model="partyForm.party_role" style="width: 100%">
         <el-option label="数据提供方" value="data_provider" />
@@ -185,16 +274,25 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import {
   createTaskParty,
+  deleteTaskParty,
   getTaskDetail,
   getTaskParties,
   getTaskResult,
   runTask,
 } from '@/api/task'
+
+
+
+import { getAgencyList } from '@/api/agency'
+import { getNodeList } from '@/api/node'
+import { getDatasetList } from '@/api/dataset'
+
+
 
 const route = useRoute()
 const router = useRouter()
@@ -222,11 +320,36 @@ const partyForm = ref({
   field_mapping_json: {},
 })
 
+
+
+
+
 const partyRules: FormRules = {
   agency_id: [{ required: true, message: '请输入机构ID', trigger: 'blur' }],
   node_id: [{ required: true, message: '请输入节点ID', trigger: 'blur' }],
   dataset_id: [{ required: true, message: '请输入数据资源ID', trigger: 'blur' }],
 }
+
+
+// 下拉框
+const resourceLoading = ref(false)
+
+const agencyOptions = ref<any[]>([])
+const nodeOptions = ref<any[]>([])
+const datasetOptions = ref<any[]>([])
+
+const filteredNodeOptions = computed(() => {
+  if (!partyForm.value.agency_id) return nodeOptions.value
+  return nodeOptions.value.filter((item) => item.agency_id === partyForm.value.agency_id)
+})
+
+const filteredDatasetOptions = computed(() => {
+  if (!partyForm.value.agency_id) return datasetOptions.value
+  return datasetOptions.value.filter((item) => item.agency_id === partyForm.value.agency_id)
+})
+
+
+
 
 function unwrapResponse(res: any) {
   return res?.data?.data ?? res?.data ?? res
@@ -273,17 +396,25 @@ async function loadResult() {
   }
 }
 
-function openPartyDialog() {
+async function openPartyDialog() {
   partyDialogVisible.value = true
+
   partyForm.value = {
-    agency_id: 1,
-    node_id: 1,
-    dataset_id: 1,
+    agency_id: null,
+    node_id: null,
+    dataset_id: null,
     party_role: 'data_provider',
     field_mapping_json: {},
   }
 
   fieldMappingText.value = '{\n  "patient_id": "patient_id",\n  "positive": "positive"\n}'
+
+  await loadResourceOptions()
+}
+
+function handleAgencyChange() {
+  partyForm.value.node_id = null
+  partyForm.value.dataset_id = null
 }
 
 async function handleCreateParty() {
@@ -291,6 +422,11 @@ async function handleCreateParty() {
 
   await partyFormRef.value.validate(async (valid) => {
     if (!valid) return
+
+    if (!partyForm.value.agency_id || !partyForm.value.node_id || !partyForm.value.dataset_id) {
+      ElMessage.warning('请选择参与机构、参与节点和数据资源')
+      return
+    }
 
     creatingParty.value = true
 
@@ -302,7 +438,10 @@ async function handleCreateParty() {
       }
 
       await createTaskParty(taskId, {
-        ...partyForm.value,
+        agency_id: partyForm.value.agency_id,
+        node_id: partyForm.value.node_id,
+        dataset_id: partyForm.value.dataset_id,
+        party_role: partyForm.value.party_role,
         field_mapping_json: fieldMapping,
       })
 
@@ -311,7 +450,7 @@ async function handleCreateParty() {
       await loadParties()
     } catch (error) {
       console.error(error)
-      ElMessage.error('参与方新增失败，请检查字段映射 JSON 或后端请求体')
+      ElMessage.error('参与方新增失败，请检查字段映射 JSON 或后端数据约束')
     } finally {
       creatingParty.value = false
     }
@@ -394,6 +533,112 @@ function getStatusType(status: string) {
   return map[status] || 'info'
 }
 
+// 删除
+async function loadResourceOptions() {
+  resourceLoading.value = true
+
+  try {
+    const [agencyRes, nodeRes, datasetRes] = await Promise.all([
+      getAgencyList({ page: 1, page_size: 100 }),
+      getNodeList({ page: 1, page_size: 100 }),
+      getDatasetList({ page: 1, page_size: 100 }),
+    ])
+
+    agencyOptions.value = normalizeList(unwrapResponse(agencyRes))
+    nodeOptions.value = normalizeList(unwrapResponse(nodeRes))
+    datasetOptions.value = normalizeList(unwrapResponse(datasetRes))
+  } catch (error) {
+    console.error(error)
+    ElMessage.error('机构、节点或数据资源列表加载失败')
+  } finally {
+    resourceLoading.value = false
+  }
+}
+
+async function handleDeleteParty(row: any) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除该参与方吗？机构ID：${row.agency_id}，数据资源ID：${row.dataset_id}`,
+      '删除确认',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+      },
+    )
+
+    await deleteTaskParty(taskId, row.id)
+
+    ElMessage.success('参与方删除成功')
+
+    await loadParties()
+    await loadDetail()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error(error)
+      ElMessage.error('参与方删除失败')
+    }
+  }
+}
+
+
+const resultMetrics = computed(() => {
+  const resultJson = parseJsonValue(taskResult.value?.result_json)
+  const metricsJson = parseJsonValue(taskResult.value?.metrics_json)
+
+  const source = {
+    ...metricsJson,
+    ...resultJson,
+  }
+
+  return {
+    case_count: source.case_count ?? source.metrics?.case_count ?? null,
+    unique_patient_count:
+      source.unique_patient_count ?? source.metrics?.unique_patient_count ?? null,
+    positive_count: source.positive_count ?? source.metrics?.positive_count ?? null,
+    positive_rate: source.positive_rate ?? source.metrics?.positive_rate ?? null,
+  }
+})
+
+function parseJsonValue(value: any) {
+  if (!value) return {}
+
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value)
+    } catch {
+      return {}
+    }
+  }
+
+  if (typeof value === 'object') {
+    return value
+  }
+
+  return {}
+}
+
+function formatMetricNumber(value: any) {
+  if (value === null || value === undefined || value === '') return '-'
+  return Number(value).toLocaleString()
+}
+
+function formatRate(value: any) {
+  if (value === null || value === undefined || value === '') return '-'
+
+  const num = Number(value)
+
+  if (Number.isNaN(num)) return '-'
+
+  if (num <= 1) {
+    return `${(num * 100).toFixed(2)}%`
+  }
+
+  return `${num.toFixed(2)}%`
+}
+
+
+
 onMounted(async () => {
   await loadDetail()
   await loadParties()
@@ -466,4 +711,47 @@ onMounted(async () => {
   font-size: 13px;
   line-height: 1.6;
 }
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.metric-card {
+  padding: 18px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+
+.metric-label {
+  font-size: 14px;
+  color: #7a8499;
+  margin-bottom: 10px;
+}
+
+.metric-value {
+  font-size: 26px;
+  font-weight: 700;
+  color: #1f2d3d;
+}
+
+.result-desc {
+  margin-top: 16px;
+}
+
+@media (max-width: 1200px) {
+  .metric-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 </style>

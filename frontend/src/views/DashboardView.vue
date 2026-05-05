@@ -5,13 +5,10 @@
         <h1>首页总览</h1>
         <p>生物安全数据联合统计系统运行态概览</p>
       </div>
-      <el-button type="primary" @click="$router.push('/tasks')">
-        进入任务管理
+
+      <el-button type="primary" :loading="loading" @click="loadAll">
+        刷新数据
       </el-button>
-      <div class="topbar-actions">
-        <span class="user-info">{{ username }}</span>
-        <el-button @click="handleLogout">退出登录</el-button>
-      </div>
     </header>
 
     <main class="dashboard-content">

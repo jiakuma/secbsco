@@ -61,4 +61,8 @@ export function getTaskParties(taskId: number | string) {
   return request.get(`/api/tasks/${taskId}/parties`)
 }
 
+export function deleteTaskParty(taskId: number | string, partyId: number | string) {
+  return request.delete(`/api/tasks/${taskId}/parties/${partyId}`)
+}
+
 
