@@ -20,6 +20,7 @@ router = APIRouter(
     tags=["联合统计任务管理"],
 )
 
+
 def write_task_audit_log(
     db: Session,
     request: Request,
@@ -55,7 +56,7 @@ def write_task_audit_log(
             request_json=request_json,
             result_json=result_json,
             ip_address=ip_address,
-        )
+        ),
     )
 
 
@@ -89,7 +90,31 @@ def create_task(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    data = task_service.create_task(db=db, task_create=task_create)
+    """
+    创建任务。
+
+    说明：
+    1. creator_user_id 不由前端传入；
+    2. 后端从当前登录用户 current_user 中自动写入；
+    3. creator_agency_id 如果前端已经选择，则保留前端选择；
+       如果前端没传，则尝试使用当前用户所属机构。
+    """
+    creator_user_id = getattr(current_user, "id", None)
+    creator_agency_id = getattr(current_user, "agency_id", None)
+
+    task_create_with_user = task_create.model_copy(
+        update={
+            "creator_user_id": creator_user_id,
+            "creator_agency_id": task_create.creator_agency_id or creator_agency_id,
+        }
+    )
+
+    data = task_service.create_task(
+        db=db,
+        task_create=task_create,
+        creator_user_id=creator_user_id,
+        creator_agency_id=creator_agency_id,
+    )
 
     write_task_audit_log(
         db=db,
@@ -100,7 +125,7 @@ def create_task(
         object_id=str(data.get("id")),
         task_id=data.get("id"),
         operation_desc="创建联合统计任务",
-        request_json=task_create.model_dump(),
+        request_json=task_create_with_user.model_dump(),
         result_json=data,
     )
 
@@ -109,6 +134,7 @@ def create_task(
         "message": "success",
         "data": data,
     }
+
 
 @router.get("/{task_id}")
 def get_task_detail(
@@ -161,25 +187,6 @@ def update_task(
     }
 
 
-@router.put("/{task_id}")
-def update_task(
-    task_id: int,
-    task_update: TaskUpdate,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    data = task_service.update_task(
-        db=db,
-        task_id=task_id,
-        task_update=task_update,
-    )
-    return {
-        "code": 0,
-        "message": "success",
-        "data": data,
-    }
-
-
 @router.put("/{task_id}/status")
 def update_task_status(
     task_id: int,
@@ -212,6 +219,7 @@ def update_task_status(
         "message": "success",
         "data": data,
     }
+
 
 @router.get("/{task_id}/parties")
 def list_task_parties(
@@ -368,16 +376,6 @@ def mock_run_task(
         },
         result_json=data,
     )
-
-    return {
-        "code": 0,
-        "message": "success",
-        "data": data,
-    }
-
-    # 3. 把结果信息追加到返回值中
-    data["result"] = TaskResultService.build_result_info(result)
-    data["message"] = "Mock 联合统计任务执行成功，已生成统计结果"
 
     return {
         "code": 0,

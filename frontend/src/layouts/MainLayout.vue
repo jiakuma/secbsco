@@ -38,16 +38,25 @@
         </el-menu-item>
       </el-menu>
 
-      <div class="side-footer">
-        <div class="user-name">{{ username }}</div>
-        <el-button size="small" plain @click="handleLogout">
-          退出登录
-        </el-button>
-      </div>
     </aside>
 
     <main class="main-content">
-      <router-view />
+      <header class="layout-header">
+        <div class="layout-title">
+          {{ route.meta.title || '系统页面' }}
+        </div>
+
+        <div class="layout-user">
+          <span class="username">{{ username }}</span>
+          <el-button size="small" @click="handleLogout">
+            退出登录
+          </el-button>
+        </div>
+      </header>
+
+      <section class="layout-body">
+        <router-view />
+      </section>
     </main>
   </div>
 </template>
@@ -163,6 +172,42 @@ async function handleLogout() {
 .main-content {
   flex: 1;
   min-width: 0;
+  min-height: 100vh;
+  background: #f5f7fb;
+  display: flex;
+  flex-direction: column;
+}
+
+.layout-header {
+  height: 56px;
+  padding: 0 24px;
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.layout-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.layout-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.username {
+  font-size: 14px;
+  color: #4b5563;
+}
+
+.layout-body {
+  flex: 1;
   overflow: auto;
 }
 </style>

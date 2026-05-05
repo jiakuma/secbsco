@@ -15,6 +15,7 @@ export interface CreateTaskPayload {
   stat_start_time?: string
   stat_end_time?: string
   description?: string
+  params_json?: Record<string, any>
 }
 
 export interface CreateTaskPartyPayload {

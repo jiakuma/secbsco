@@ -2,8 +2,8 @@
   <div class="task-page">
     <div class="page-header">
       <div>
-        <h2>联合统计任务</h2>
-        <p>创建、执行并查看多机构联合统计任务</p>
+        <h2>任务中心</h2>
+        <p>统一管理联合统计任务，并为后续联邦学习任务预留入口</p>
       </div>
 
       <div class="header-actions">
@@ -38,6 +38,18 @@
           </el-select>
         </el-form-item>
 
+        <el-form-item label="任务类型">
+          <el-select
+            v-model="queryForm.task_type"
+            placeholder="全部类型"
+            clearable
+            style="width: 160px"
+          >
+            <el-option label="联合统计" value="statistic" />
+            <el-option label="联邦学习" value="federated_learning" />
+          </el-select>
+        </el-form-item>
+
         <el-form-item>
           <el-button type="primary" @click="loadTasks">查询</el-button>
           <el-button @click="resetQuery">重置</el-button>
@@ -48,13 +60,21 @@
     <el-card shadow="never">
       <el-table
         v-loading="loading"
-        :data="taskList"
+        :data="filteredTaskList"
         border
         style="width: 100%"
       >
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="task_code" label="任务编号" min-width="180" />
         <el-table-column prop="task_name" label="任务名称" min-width="180" />
+
+        <el-table-column label="任务类型" width="130">
+          <template #default="{ row }">
+            <el-tag :type="getTaskTypeTagType(row)">
+              {{ getTaskTypeText(row) }}
+            </el-tag>
+          </template>
+        </el-table-column>
 
         <el-table-column prop="status" label="状态" width="120">
           <template #default="{ row }">
@@ -110,7 +130,7 @@
 
     <el-dialog
       v-model="createDialogVisible"
-      title="新建联合统计任务"
+      title="新建任务"
       width="640px"
       destroy-on-close
     >
@@ -127,6 +147,21 @@
         <el-form-item label="任务名称" prop="task_name">
           <el-input v-model="createForm.task_name" placeholder="例如 流感样病例联合统计任务" />
         </el-form-item>
+
+        <el-form-item label="任务类型" prop="task_type">
+          <el-select
+            v-model="createForm.task_type"
+            placeholder="请选择任务类型"
+            style="width: 100%"
+          >
+            <el-option label="联合统计" value="statistic" />
+            <el-option label="联邦学习（待开发）" value="federated_learning" disabled />
+          </el-select>
+          <div class="form-tip">
+            当前阶段先支持联合统计；联邦学习将在任务模型设计完成后开放。
+          </div>
+        </el-form-item>
+
         <el-form-item label="统计模板" prop="template_id">
           <el-select
             v-model="createForm.template_id"
@@ -195,7 +230,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { getAgencyList } from '@/api/agency'
 import { getStatTemplateList } from '@/api/statTemplate'
 import { useRouter } from 'vue-router'
@@ -207,6 +242,8 @@ import {
   runTask,
   type CreateTaskPayload,
 } from '@/api/task'
+
+type TaskType = 'statistic' | 'federated_learning'
 
 const router = useRouter()
 
@@ -228,6 +265,7 @@ const queryForm = reactive({
   page_size: 10,
   keyword: '',
   status: '',
+  task_type: '',
 })
 
 const createDialogVisible = ref(false)
@@ -235,9 +273,10 @@ const createFormRef = ref<FormInstance>()
 
 const statRange = ref<string[]>([])
 
-const createForm = reactive<CreateTaskPayload>({
+const createForm = reactive<CreateTaskPayload & { task_type: TaskType }>({
   task_code: '',
   task_name: '',
+  task_type: 'statistic',
   template_id: null,
   creator_agency_id: null,
   stat_start_time: '',
@@ -248,12 +287,53 @@ const createForm = reactive<CreateTaskPayload>({
 const createRules: FormRules = {
   task_code: [{ required: true, message: '请输入任务编号', trigger: 'blur' }],
   task_name: [{ required: true, message: '请输入任务名称', trigger: 'blur' }],
+  task_type: [{ required: true, message: '请选择任务类型', trigger: 'change' }],
   template_id: [{ required: true, message: '请选择统计模板', trigger: 'change' }],
   creator_agency_id: [{ required: true, message: '请选择创建机构', trigger: 'change' }],
 }
 
 function unwrapResponse(res: any) {
   return res?.data?.data ?? res?.data ?? res
+}
+
+function parseJsonObject(value: any) {
+  if (!value) return {}
+
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value)
+    } catch {
+      return {}
+    }
+  }
+
+  if (typeof value === 'object') {
+    return value
+  }
+
+  return {}
+}
+
+function getTaskType(row: any): TaskType {
+  const paramsJson = parseJsonObject(row?.params_json)
+  return (row?.task_type || paramsJson.task_type || 'statistic') as TaskType
+}
+
+function getTaskTypeText(row: any) {
+  const map: Record<TaskType, string> = {
+    statistic: '联合统计',
+    federated_learning: '联邦学习',
+  }
+
+  return map[getTaskType(row)] || '联合统计'
+}
+
+function getTaskTypeTagType(row: any) {
+  return getTaskType(row) === 'federated_learning' ? 'warning' : 'success'
+}
+
+function isFederatedLearningTask(row: any) {
+  return getTaskType(row) === 'federated_learning'
 }
 
 function normalizeList(payload: any) {
@@ -290,6 +370,15 @@ function normalizeList(payload: any) {
     total: 0,
   }
 }
+
+
+const filteredTaskList = computed(() => {
+  if (!queryForm.task_type) {
+    return taskList.value
+  }
+
+  return taskList.value.filter((item) => getTaskType(item) === queryForm.task_type)
+})
 
 async function loadAgencyOptions() {
   agencyLoading.value = true
@@ -361,6 +450,7 @@ function resetQuery() {
   queryForm.page = 1
   queryForm.keyword = ''
   queryForm.status = ''
+  queryForm.task_type = ''
   loadTasks()
 }
 
@@ -369,6 +459,7 @@ async function openCreateDialog() {
 
   createForm.task_code = `FLU_TASK_${Date.now()}`
   createForm.task_name = ''
+  createForm.task_type = 'statistic'
   createForm.template_id = null
   createForm.creator_agency_id = null
   createForm.stat_start_time = ''
@@ -409,6 +500,9 @@ async function handleCreate() {
         description: createForm.description || undefined,
         stat_start_time: statRange.value?.[0] || undefined,
         stat_end_time: statRange.value?.[1] || undefined,
+        params_json: {
+          task_type: createForm.task_type,
+        },
       }
 
       await createTask(payload)
@@ -430,6 +524,11 @@ function goDetail(taskId: number | string) {
 }
 
 async function handleRun(row: any) {
+  if (isFederatedLearningTask(row)) {
+    ElMessage.warning('联邦学习任务执行能力待开发')
+    return
+  }
+
   if (row.status === 'success') {
     ElMessage.info('该任务已执行成功，如需重新执行请先调整任务状态')
     return
@@ -470,6 +569,11 @@ async function handleRun(row: any) {
 
 
 async function goResult(row: any) {
+  if (isFederatedLearningTask(row)) {
+    ElMessage.warning('联邦学习任务结果展示待开发')
+    return
+  }
+
   if (row.status !== 'success') {
     ElMessage.warning('当前任务暂无统计结果，请先执行任务')
     return
@@ -511,10 +615,12 @@ function getStatusType(status: string) {
 }
 
 function canRunTask(row: any) {
+  if (isFederatedLearningTask(row)) return false
   return ['created', 'pending', 'failed'].includes(row.status)
 }
 
 function getRunButtonText(row: any) {
+  if (isFederatedLearningTask(row)) return '待开发'
   if (runningTaskId.value === row.id) return '执行中'
   if (row.status === 'success') return '已执行'
   if (row.status === 'running') return '执行中'
@@ -562,6 +668,13 @@ onMounted(() => {
 
 .query-card {
   margin-bottom: 16px;
+}
+
+.form-tip {
+  margin-top: 6px;
+  color: #8c96a8;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .pagination-wrapper {

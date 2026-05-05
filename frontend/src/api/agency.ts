@@ -1,5 +1,12 @@
 import request from './request'
 
-export function getAgencyList(params?: any) {
+export interface AgencyQueryParams {
+  page?: number
+  page_size?: number
+  keyword?: string
+  status?: string
+}
+
+export function getAgencyList(params?: AgencyQueryParams) {
   return request.get('/api/agencies', { params })
 }

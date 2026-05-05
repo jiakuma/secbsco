@@ -91,12 +91,27 @@ def list_tasks(
     }
 
 
-def create_task(db: Session, task_create: TaskCreate) -> dict:
+def create_task(
+    db: Session,
+    task_create: TaskCreate,
+    creator_user_id: int | None = None,
+    creator_agency_id: int | None = None,
+) -> dict:
     exists = db.query(Task).filter(Task.task_code == task_create.task_code).first()
     if exists:
         raise HTTPException(status_code=400, detail="任务编码已存在")
 
-    task = Task(**task_create.model_dump())
+    task_data = task_create.model_dump()
+
+    # 创建人用户 ID：后端从当前登录用户写入，不依赖前端
+    task_data["creator_user_id"] = creator_user_id
+
+    # 创建机构：优先使用前端选择；没选时用当前用户机构兜底
+    if not task_data.get("creator_agency_id"):
+        task_data["creator_agency_id"] = creator_agency_id
+
+    task = Task(**task_data)
+
     db.add(task)
     db.commit()
     db.refresh(task)

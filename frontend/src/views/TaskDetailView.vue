@@ -3,13 +3,18 @@
     <div class="page-header">
       <div>
         <h2>任务详情</h2>
-        <p>查看联合统计任务配置、执行状态和统计结果</p>
+        <p>查看任务配置、执行状态和结果信息</p>
       </div>
 
       <div class="header-actions">
         <el-button @click="goBack">返回列表</el-button>
-        <el-button type="success" :loading="running" @click="handleRun">
-          执行任务
+        <el-button
+          type="success"
+          :loading="running"
+          :disabled="isFederatedLearningTask(taskDetail)"
+          @click="handleRun"
+        >
+          {{ isFederatedLearningTask(taskDetail) ? '待开发' : '执行任务' }}
         </el-button>
       </div>
     </div>
@@ -27,6 +32,12 @@
         <el-descriptions-item label="任务状态">
           <el-tag :type="getStatusType(taskDetail?.status)">
             {{ getStatusText(taskDetail?.status) }}
+          </el-tag>
+        </el-descriptions-item>
+
+        <el-descriptions-item label="任务类型">
+          <el-tag :type="getTaskTypeTagType(taskDetail)">
+            {{ getTaskTypeText(taskDetail) }}
           </el-tag>
         </el-descriptions-item>
 
@@ -113,7 +124,34 @@
 
       <el-empty v-if="!partyList.length" description="暂无参与方数据" />
     </el-card>
-    <el-card class="section-card" shadow="never">
+
+    <el-alert
+      v-if="isFederatedLearningTask(taskDetail)"
+      class="section-card"
+      title="联邦学习任务能力待接入"
+      type="warning"
+      description="当前页面已预留联邦学习任务入口，后续将在任务模型、算法配置、训练参数和执行框架确定后开放。"
+      show-icon
+      :closable="false"
+    />
+
+    <el-alert
+      v-else
+      class="section-card"
+      title="当前任务类型：联合统计"
+      type="success"
+      description="当前任务继续使用已有联合统计流程，可配置参与方、执行任务并查看统计结果。"
+      show-icon
+      :closable="false"
+    />
+
+    <el-card
+      v-if="!isFederatedLearningTask(taskDetail)"
+      class="section-card"
+      shadow="never"
+    >
+
+
   <template #header>
     <div class="result-header">
       <div class="card-title">统计结果</div>
@@ -180,7 +218,8 @@
   <el-empty v-else description="暂无统计结果，请先执行任务" />
 </el-card>
   </div>
-  <el-dialog
+<el-dialog
+  v-if="!isFederatedLearningTask(taskDetail)"
   v-model="partyDialogVisible"
   title="新增任务参与方"
   width="560px"
@@ -296,6 +335,8 @@ import { getDatasetList } from '@/api/dataset'
 
 const route = useRoute()
 const router = useRouter()
+
+type TaskType = 'statistic' | 'federated_learning'
 
 const taskId = route.params.id as string
 
@@ -458,6 +499,11 @@ async function handleCreateParty() {
 }
 
 async function handleRun() {
+  if (isFederatedLearningTask(taskDetail.value)) {
+    ElMessage.warning('联邦学习任务执行能力待开发')
+    return
+  }
+
   if (!partyList.value.length) {
   ElMessage.warning('请先配置任务参与方，再执行联合统计任务')
   return
@@ -507,6 +553,28 @@ function formatJson(value: any) {
   } catch {
     return String(value)
   }
+}
+
+function getTaskType(row: any): TaskType {
+  const paramsJson = parseJsonValue(row?.params_json)
+  return (row?.task_type || paramsJson.task_type || 'statistic') as TaskType
+}
+
+function getTaskTypeText(row: any) {
+  const map: Record<TaskType, string> = {
+    statistic: '联合统计',
+    federated_learning: '联邦学习',
+  }
+
+  return map[getTaskType(row)] || '联合统计'
+}
+
+function getTaskTypeTagType(row: any) {
+  return getTaskType(row) === 'federated_learning' ? 'warning' : 'success'
+}
+
+function isFederatedLearningTask(row: any) {
+  return getTaskType(row) === 'federated_learning'
 }
 
 function getStatusText(status: string) {
