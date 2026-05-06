@@ -39,6 +39,7 @@ class AuditLogService:
         operator_user_id: Optional[int] = None,
         operation_type: Optional[str] = None,
         object_type: Optional[str] = None,
+        object_id: Optional[str] = None,
         page: int = 1,
         page_size: int = 10
     ):
@@ -58,6 +59,9 @@ class AuditLogService:
 
         if object_type:
             query = query.filter(AuditLog.object_type == object_type)
+
+        if object_id:
+            query = query.filter(AuditLog.object_id == str(object_id))
 
         total = query.count()
 

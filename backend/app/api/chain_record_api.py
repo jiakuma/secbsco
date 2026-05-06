@@ -14,6 +14,90 @@ router = APIRouter(
 )
 
 
+def _safe_int(value) -> int | None:
+    """
+    将 biz_id 等字符串安全转换为整数。
+    """
+    try:
+        if value is None or value == "":
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_related_task_info(db: Session, record) -> dict | None:
+    """
+    根据 chain_record.biz_type / biz_id 推导关联任务。
+
+    说明：
+    1. biz_type = task 时，biz_id 本身就是 task.id；
+    2. biz_type = task_result 时，biz_id 是 task_result.id，需要反查 task_result.task_id；
+    3. biz_type = audit_log 时，biz_id 是 audit_log.id，需要反查 audit_log.task_id；
+    4. 当前阶段不修改 chain_record 表结构，只在接口返回层补充 related_task 信息。
+    """
+    biz_type = getattr(record, "biz_type", None)
+    biz_id = _safe_int(getattr(record, "biz_id", None))
+
+    if not biz_type or biz_id is None:
+        return None
+
+    task_id: int | None = None
+
+    if biz_type == "task":
+        task_id = biz_id
+
+    elif biz_type == "task_result":
+        result = TaskResultService.get_result_by_id(
+            db=db,
+            result_id=biz_id,
+        )
+        task_id = getattr(result, "task_id", None) if result else None
+
+    elif biz_type == "audit_log":
+        log = AuditLogService.get_log_by_id(
+            db=db,
+            log_id=biz_id,
+        )
+        task_id = getattr(log, "task_id", None) if log else None
+
+    if not task_id:
+        return None
+
+    try:
+        task = task_service.get_task_or_404(
+            db=db,
+            task_id=task_id,
+        )
+    except Exception:
+        return {
+            "task_id": task_id,
+            "task_code": None,
+            "task_name": None,
+            "task_status": None,
+        }
+
+    return {
+        "task_id": getattr(task, "id", task_id),
+        "task_code": getattr(task, "task_code", None),
+        "task_name": getattr(task, "task_name", None),
+        "task_status": getattr(task, "status", None),
+    }
+
+
+def _build_record_info_with_related_task(db: Session, record) -> dict:
+    """
+    构造存证记录返回对象，并补充前端跳转任务详情所需字段。
+    """
+    data = ChainRecordService.build_record_info(record)
+    related_task = _build_related_task_info(db=db, record=record)
+
+    data["related_task"] = related_task
+    data["related_task_id"] = related_task.get("task_id") if related_task else None
+
+    return data
+
+
 @router.get("/api/chain-records")
 def list_chain_records(
     biz_type: str | None = Query(default=None, description="业务类型"),
@@ -44,7 +128,7 @@ def list_chain_records(
             "page": page,
             "page_size": page_size,
             "items": [
-                ChainRecordService.build_record_info(item)
+                _build_record_info_with_related_task(db=db, record=item)
                 for item in items
             ],
         },
@@ -74,7 +158,7 @@ def get_chain_record(
     return {
         "code": 0,
         "message": "success",
-        "data": ChainRecordService.build_record_info(record),
+        "data": _build_record_info_with_related_task(db=db, record=record),
     }
 
 
@@ -106,8 +190,6 @@ def get_chain_record(
 #         "message": "success",
 #         "data": ChainRecordService.build_record_info(record),
 #     }
-
-
 
 
 @router.post("/api/task-results/{result_id}/chain-anchor")
@@ -142,7 +224,7 @@ def anchor_task_result(
     return {
         "code": 0,
         "message": "success",
-        "data": ChainRecordService.build_record_info(record),
+        "data": _build_record_info_with_related_task(db=db, record=record),
     }
 
 
@@ -178,5 +260,5 @@ def anchor_audit_log(
     return {
         "code": 0,
         "message": "success",
-        "data": ChainRecordService.build_record_info(record),
+        "data": _build_record_info_with_related_task(db=db, record=record),
     }

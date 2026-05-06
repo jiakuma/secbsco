@@ -19,13 +19,19 @@ def list_audit_logs(
     operator_user_id: int | None = Query(default=None, description="操作用户ID"),
     operation_type: str | None = Query(default=None, description="操作类型"),
     object_type: str | None = Query(default=None, description="对象类型"),
+    object_id: str | None = Query(default=None, description="对象ID"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     """
-    查询审计日志列表
+    查询审计日志列表。
+
+    第十七阶段补充 object_id 查询条件，用于：
+    - 存证记录 -> 审计日志联动；
+    - object_type = chain_record；
+    - object_id = chain_record.id。
     """
     total, items = AuditLogService.list_logs(
         db=db,
@@ -34,6 +40,7 @@ def list_audit_logs(
         operator_user_id=operator_user_id,
         operation_type=operation_type,
         object_type=object_type,
+        object_id=object_id,
         page=page,
         page_size=page_size,
     )
