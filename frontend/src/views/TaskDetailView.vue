@@ -14,7 +14,7 @@
           :disabled="running"
           @click="handleRun"
         >
-          {{ isFederatedLearningTask(taskDetail) ? '执行 Mock 联邦训练' : '执行任务' }}
+          {{ isFederatedLearningTask(taskDetail) ? '执行联邦训练' : '执行任务' }}
         </el-button>
       </div>
     </div>
@@ -87,7 +87,7 @@
       <template #header>
         <div class="result-header">
           <div class="card-title">T2 联邦学习任务配置</div>
-          <el-tag type="warning" effect="plain">第十四阶段模板预留</el-tag>
+          <el-tag type="warning" effect="plain">SecretFlow 真实训练已接入</el-tag>
         </div>
       </template>
 
@@ -96,7 +96,7 @@
           {{ taskParams.scenario_name || '跨区县传染病时空预测与疫情溯源' }}
         </div>
         <div class="scenario-text">
-          基于各区县本地脱敏个案数据开展横向联邦学习，训练全局传染病时空预测模型；同时预留隐私求交溯源配置，用于后续分析跨区县高风险空间网格交集。
+          基于 Alice / Bob 本地脱敏样本开展横向联邦学习，调用 Alice 18181 SecretFlow 训练服务完成真实联邦训练，并支持将训练结果摘要写入 FISCO BCOS。
         </div>
       </div>
 
@@ -104,14 +104,14 @@
         <div class="fl-info-panel">
           <div class="fl-info-title">业务目标</div>
           <div class="fl-info-text">
-            在不汇聚原始个案数据的前提下，联合多个区县节点训练疾病传播趋势预测模型，辅助发现潜在高风险区域和传播源线索。
+            在不汇聚原始数据的前提下，联合多个节点训练传染病风险预测模型，输出 Accuracy、AUC、Precision、Recall、F1 等训练指标。
           </div>
         </div>
 
         <div class="fl-info-panel">
           <div class="fl-info-title">安全边界</div>
           <div class="fl-info-text">
-            原始数据不出本地节点，仅交换模型参数、聚合结果和过程摘要；训练记录、参与方和结果摘要后续可继续接入链上存证。
+            原始数据不出本地节点，系统仅接收训练指标、参与方摘要、结果哈希和链上存证凭证；当前聚合方式为 SparsePlainAggregator 验证版。
           </div>
         </div>
       </div>
@@ -129,10 +129,10 @@
           {{ getAlgorithmTypeText(taskParams.algorithm_type) }}
         </el-descriptions-item>
         <el-descriptions-item label="模型类型">
-          {{ getModelTypeText(taskParams.model_type) }}
+          {{ effectiveFlModelTypeText }}
         </el-descriptions-item>
         <el-descriptions-item label="执行框架">
-          {{ taskParams.framework || 'mock' }}
+          {{ formatFramework(effectiveFlFramework) }}
         </el-descriptions-item>
         <el-descriptions-item label="主表">
           {{ datasetConfig.main_table || 'IDSR_INDIVIDUAL_DIS' }}
@@ -172,8 +172,8 @@
           <div class="config-metric-value">{{ trainConfig.learning_rate ?? 0.01 }}</div>
         </div>
         <div class="config-metric-card">
-          <div class="config-metric-label">安全聚合</div>
-          <div class="config-metric-value">{{ privacyConfig.secure_aggregation ? '启用' : '未启用' }}</div>
+          <div class="config-metric-label">聚合方式</div>
+          <div class="config-metric-value">{{ effectiveFlAggregator }}</div>
         </div>
         <div class="config-metric-card">
           <div class="config-metric-label">原始数据导出</div>
@@ -185,7 +185,7 @@
         </div>
       </div>
 
-      <el-divider content-position="left">执行流程预留</el-divider>
+      <el-divider content-position="left">执行流程</el-divider>
 
       <div class="fl-process-list">
         <div
@@ -292,9 +292,9 @@
     <el-alert
       v-if="isFederatedLearningTask(taskDetail)"
       class="section-card"
-      title="Mock 联邦训练闭环已接入"
+      title="联邦训练服务已接入"
       type="success"
-      description="当前联邦学习任务可以执行 Mock 联邦训练，执行后将生成训练轮次、准确率、损失值、AUC 等指标，并写入任务结果。"
+      description="当前联邦学习任务已接入 Alice 18181 SecretFlow 真实训练服务，执行后会生成 Accuracy、AUC、Precision、Recall、F1、result_hash 等训练结果，并可继续进行 FISCO BCOS 真实链上存证。"
       show-icon
       :closable="false"
     />
@@ -316,10 +316,10 @@
               type="warning"
               plain
               :loading="anchoring"
-              :disabled="!taskResult || taskDetail?.status !== 'success'"
+              :disabled="!taskResult || taskDetail?.status !== 'success' || hasSuccessfulChainAnchor"
               @click="handleAnchorTaskResult"
             >
-              结果存证
+              {{ anchorButtonText }}
             </el-button>
           </div>
         </div>
@@ -328,28 +328,42 @@
       <template v-if="taskResult">
         <div class="metric-grid">
           <div class="metric-card">
-            <div class="metric-label">最终准确率</div>
+            <div class="metric-label">Accuracy</div>
             <div class="metric-value">
               {{ formatPercentNumber(federatedSummary.final_accuracy) }}
             </div>
           </div>
 
           <div class="metric-card">
-            <div class="metric-label">最终损失</div>
-            <div class="metric-value">
-              {{ formatDecimalNumber(federatedSummary.final_loss) }}
-            </div>
-          </div>
-
-          <div class="metric-card">
-            <div class="metric-label">最终 AUC</div>
+            <div class="metric-label">AUC</div>
             <div class="metric-value">
               {{ formatDecimalNumber(federatedSummary.final_auc) }}
             </div>
           </div>
 
           <div class="metric-card">
-            <div class="metric-label">训练轮数</div>
+            <div class="metric-label">Precision</div>
+            <div class="metric-value">
+              {{ formatPercentNumber(federatedSummary.final_precision) }}
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">Recall</div>
+            <div class="metric-value">
+              {{ formatPercentNumber(federatedSummary.final_recall) }}
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">F1</div>
+            <div class="metric-value">
+              {{ formatDecimalNumber(federatedSummary.final_f1) }}
+            </div>
+          </div>
+
+          <div class="metric-card">
+            <div class="metric-label">训练轮次</div>
             <div class="metric-value">
               {{ federatedSummary.round_count ?? '-' }}
             </div>
@@ -380,11 +394,23 @@
           </el-descriptions-item>
 
           <el-descriptions-item label="执行框架">
-            {{ federatedResultJson.framework || '-' }}
+            {{ formatFramework(federatedResultJson.framework) }}
           </el-descriptions-item>
 
-          <el-descriptions-item label="隐私模式">
-            {{ federatedSummary.privacy_mode || '-' }}
+          <el-descriptions-item label="联邦模式">
+            {{ getFederatedModeText(federatedResultJson.train_mode || federatedResultJson.partition_type) }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="训练策略">
+            {{ federatedResultJson.strategy || '-' }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="聚合方式">
+            {{ federatedResultJson.aggregator || federatedSummary.privacy_mode || '-' }}
+          </el-descriptions-item>
+
+          <el-descriptions-item label="SecretFlow版本">
+            {{ federatedResultJson.secretflow_version || '-' }}
           </el-descriptions-item>
 
           <el-descriptions-item label="原始数据导出">
@@ -406,7 +432,7 @@
           type="success"
           show-icon
           :closable="false"
-          :title="chainAnchorResult.duplicated ? '当前任务结果已完成存证' : 'Mock 任务结果存证成功'"
+          :title="getChainAnchorAlertTitle(chainAnchorResult)"
         />
 
         <el-descriptions
@@ -420,7 +446,7 @@
           </el-descriptions-item>
 
           <el-descriptions-item label="链类型">
-            {{ chainAnchorResult.chain_record.chain_type || '-' }}
+            {{ formatChainType(chainAnchorResult.chain_record.chain_type) }}
           </el-descriptions-item>
 
           <el-descriptions-item label="区块高度">
@@ -440,9 +466,62 @@
           </el-descriptions-item>
         </el-descriptions>
 
-        <el-divider content-position="left">训练轮次指标</el-divider>
+        <el-divider content-position="left">分方训练指标</el-divider>
 
         <el-table
+          v-if="federatedPartyMetricsRows.length"
+          :data="federatedPartyMetricsRows"
+          border
+          size="small"
+          style="width: 100%"
+        >
+          <el-table-column prop="party" label="参与方" width="120" />
+          <el-table-column label="样本数" width="120">
+            <template #default="{ row }">
+              {{ formatMetricNumber(row.sample_count) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="Accuracy" width="140">
+            <template #default="{ row }">
+              {{ formatPercentNumber(row.accuracy) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="AUC" width="140">
+            <template #default="{ row }">
+              {{ formatDecimalNumber(row.auc) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="Precision" width="140">
+            <template #default="{ row }">
+              {{ formatPercentNumber(row.precision) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="Recall" width="140">
+            <template #default="{ row }">
+              {{ formatPercentNumber(row.recall) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="F1" width="120">
+            <template #default="{ row }">
+              {{ formatDecimalNumber(row.f1) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="阳性率" width="120">
+            <template #default="{ row }">
+              {{ formatRate(row.positive_rate) }}
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <el-empty
+          v-else
+          description="暂无分方指标"
+        />
+
+        <el-divider v-if="federatedRounds.length" content-position="left">训练轮次指标</el-divider>
+
+        <el-table
+          v-if="federatedRounds.length"
           :data="federatedRounds"
           border
           size="small"
@@ -471,7 +550,7 @@
         <pre class="json-view">{{ formatJson(taskResult.result_json || taskResult.metrics_json || taskResult) }}</pre>
       </template>
 
-      <el-empty v-else description="暂无联邦训练结果，请先执行 Mock 联邦训练" />
+      <el-empty v-else description="暂无联邦训练结果，请先执行联邦训练" />
     </el-card>
 
     <el-alert
@@ -568,7 +647,7 @@
       type="success"
       show-icon
       :closable="false"
-      :title="chainAnchorResult.duplicated ? '当前任务结果已完成存证' : 'Mock 任务结果存证成功'"
+      :title="getChainAnchorAlertTitle(chainAnchorResult)"
     />
 
     <el-descriptions
@@ -582,7 +661,7 @@
       </el-descriptions-item>
 
       <el-descriptions-item label="链类型">
-        {{ chainAnchorResult.chain_record.chain_type || '-' }}
+        {{ formatChainType(chainAnchorResult.chain_record.chain_type) }}
       </el-descriptions-item>
 
       <el-descriptions-item label="区块高度">
@@ -730,6 +809,7 @@ import {
   getTaskResult,
   runTask,
 } from '@/api/task'
+import { getChainRecordList } from '@/api/chainRecord'
 
 
 
@@ -867,10 +947,92 @@ async function loadResult() {
   try {
     const res = await getTaskResult(taskId)
     taskResult.value = unwrapResponse(res)
+    await loadChainRecordForCurrentResult()
   } catch (error) {
-    console.warn('暂无统计结果', error)
+    console.warn('暂无任务结果', error)
     taskResult.value = null
+    chainAnchorResult.value = null
   }
+}
+
+async function loadChainRecordForCurrentResult() {
+  if (!taskResult.value?.id) {
+    chainAnchorResult.value = null
+    return
+  }
+
+  try {
+    const res = await getChainRecordList({
+      page: 1,
+      page_size: 1,
+      biz_type: 'task_result',
+      biz_id: String(taskResult.value.id),
+      status: 'success',
+    })
+
+    const data = unwrapResponse(res) || {}
+    const record = Array.isArray(data.items) ? data.items[0] : null
+
+    if (record) {
+      chainAnchorResult.value = {
+        anchored: true,
+        duplicated: true,
+        message: '当前任务结果已完成 FISCO BCOS 链上存证',
+        chain_record: record,
+      }
+    } else {
+      chainAnchorResult.value = null
+    }
+  } catch (error) {
+    console.warn('存证记录加载失败', error)
+  }
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+function isRequestTimeoutOrNetworkError(error: any) {
+  const code = String(error?.code || '')
+  const message = String(error?.message || '')
+  const responseStatus = error?.response?.status
+
+  return (
+    code === 'ECONNABORTED' ||
+    code === 'ERR_NETWORK' ||
+    responseStatus === 504 ||
+    message.includes('timeout') ||
+    message.includes('Network Error') ||
+    message.includes('网络')
+  )
+}
+
+async function refreshRuntimeState() {
+  await loadDetail()
+  await loadParties()
+  await loadResult()
+
+  return (
+    taskDetail.value?.status === 'success' ||
+    taskResult.value?.status === 'success' ||
+    !!taskResult.value?.result_hash
+  )
+}
+
+async function recoverRunSuccessAfterRequestError(isFlTask: boolean) {
+  // 联邦训练耗时较长时，浏览器请求可能先超时，但后端仍会继续执行并最终写入 task_result。
+  // 这里在“网络异常/超时”后短轮询任务结果，避免明明成功却提示执行失败。
+  for (let i = 0; i < 15; i += 1) {
+    await sleep(i === 0 ? 1000 : 5000)
+
+    const success = await refreshRuntimeState()
+    if (success) {
+      ElMessage.success(isFlTask ? '联邦训练已在后台完成，结果已刷新' : '任务已在后台完成，结果已刷新')
+      return true
+    }
+  }
+
+  return false
 }
 
 async function openPartyDialog() {
@@ -938,13 +1100,13 @@ async function handleRun() {
   const isFlTask = isFederatedLearningTask(taskDetail.value)
 
   if (!partyList.value.length) {
-    ElMessage.warning(isFlTask ? '请先配置训练节点，再执行 Mock 联邦训练' : '请先配置任务参与方，再执行联合统计任务')
+    ElMessage.warning(isFlTask ? '请先配置训练节点，再执行联邦训练' : '请先配置任务参与方，再执行联合统计任务')
     return
   }
 
   try {
     await ElMessageBox.confirm(
-      isFlTask ? '确认执行当前 Mock 联邦训练任务吗？' : '确认执行当前联合统计任务吗？',
+      isFlTask ? '确认执行当前联邦训练任务吗？训练过程可能需要 1–3 分钟，请勿重复点击。' : '确认执行当前联合统计任务吗？',
       '执行确认',
       {
         type: 'warning',
@@ -962,16 +1124,21 @@ async function handleRun() {
       taskResult.value = data.result
     }
 
-    ElMessage.success(isFlTask ? 'Mock 联邦训练执行成功' : '任务执行成功')
+    ElMessage.success(isFlTask ? '联邦训练执行成功' : '任务执行成功')
 
-    await loadDetail()
-    await loadParties()
-    await loadResult()
+    await refreshRuntimeState()
   } catch (error: any) {
-    if (error !== 'cancel') {
-      console.error(error)
-      ElMessage.error(isFlTask ? 'Mock 联邦训练执行失败' : '任务执行失败')
+    if (error === 'cancel') return
+
+    console.error(error)
+
+    if (isRequestTimeoutOrNetworkError(error)) {
+      ElMessage.warning(isFlTask ? '请求超时或网络中断，正在检查后台训练结果...' : '请求超时或网络中断，正在检查后台执行结果...')
+      const recovered = await recoverRunSuccessAfterRequestError(isFlTask)
+      if (recovered) return
     }
+
+    ElMessage.error(isFlTask ? '联邦训练执行失败，请查看后端日志或稍后刷新页面确认状态' : '任务执行失败，请查看后端日志或稍后刷新页面确认状态')
   } finally {
     running.value = false
   }
@@ -990,7 +1157,7 @@ async function handleAnchorTaskResult() {
 
   try {
     await ElMessageBox.confirm(
-      '确认对当前任务结果进行 Mock 链上存证吗？当前阶段仅写入本地 chain_record，不调用真实 FISCO BCOS。',
+      '确认对当前任务结果进行 FISCO BCOS 链上存证吗？系统将调用 Alice 上链服务，写入链上交易并保存真实 tx_hash、区块高度和合约地址。',
       '结果存证确认',
       {
         type: 'warning',
@@ -1009,8 +1176,10 @@ async function handleAnchorTaskResult() {
     if (data?.duplicated) {
       ElMessage.info(data.message || '当前任务结果已完成存证，无需重复存证')
     } else {
-      ElMessage.success(data?.message || 'Mock 任务结果存证成功')
+      ElMessage.success(data?.message || '任务结果真实上链存证成功')
     }
+
+    await loadChainRecordForCurrentResult()
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error(error)
@@ -1086,6 +1255,42 @@ function getStatusType(status: string) {
   return map[status] || 'info'
 }
 
+function formatChainType(type: string) {
+  const map: Record<string, string> = {
+    fisco_bcos: 'FISCO BCOS',
+    mock_fisco_bcos: 'Mock FISCO BCOS',
+  }
+
+  return map[type] || type || '-'
+}
+
+function formatFramework(value: string | null | undefined) {
+  const map: Record<string, string> = {
+    mock: '历史 Mock 配置（已由结果覆盖）',
+    flower: 'Flower',
+    secretflow: 'SecretFlow',
+  }
+
+  return map[value || ''] || value || '-'
+}
+
+function getChainAnchorAlertTitle(result: any) {
+  if (!result) return ''
+
+  if (result.duplicated) {
+    const chainType = result.chain_record?.chain_type
+    if (chainType === 'fisco_bcos') {
+      return '当前任务结果已完成 FISCO BCOS 链上存证'
+    }
+    if (chainType === 'mock_fisco_bcos') {
+      return '当前任务结果已存在历史 Mock 存证记录'
+    }
+    return '当前任务结果已完成存证'
+  }
+
+  return result.message || '任务结果真实上链存证成功'
+}
+
 async function loadResourceOptions() {
   resourceLoading.value = true
 
@@ -1157,13 +1362,69 @@ const federatedResultJson = computed(() => {
   return parseJsonValue(taskResult.value?.result_json)
 })
 
+const federatedMetricsJson = computed(() => {
+  return parseJsonValue(taskResult.value?.metrics_json)
+})
+
 const federatedSummary = computed(() => {
-  return federatedResultJson.value?.summary || {}
+  const result = federatedResultJson.value || {}
+  const metrics = federatedMetricsJson.value || {}
+  const summary = result.summary || {}
+
+  return {
+    final_accuracy: summary.final_accuracy ?? metrics.final_accuracy ?? result.metrics?.accuracy,
+    final_auc: summary.final_auc ?? metrics.final_auc ?? result.metrics?.auc,
+    final_precision: summary.final_precision ?? metrics.final_precision ?? result.metrics?.precision,
+    final_recall: summary.final_recall ?? metrics.final_recall ?? result.metrics?.recall,
+    final_f1: summary.final_f1 ?? metrics.final_f1 ?? result.metrics?.f1,
+    final_loss: summary.final_loss ?? metrics.final_loss,
+    round_count: summary.round_count ?? metrics.round_count ?? result.training_params?.epochs,
+    participant_count: summary.participant_count ?? metrics.participant_count ?? result.participants?.length,
+    sample_count: summary.sample_count ?? metrics.sample_count ?? result.metrics?.sample_count,
+    privacy_mode: summary.privacy_mode ?? metrics.privacy_mode ?? result.aggregator,
+    raw_data_export: summary.raw_data_export ?? metrics.raw_data_export,
+  }
 })
 
 const federatedRounds = computed(() => {
   const rounds = federatedResultJson.value?.rounds
   return Array.isArray(rounds) ? rounds : []
+})
+
+const federatedPartyMetricsRows = computed(() => {
+  const metricsByParty = federatedResultJson.value?.metrics_by_party || {}
+
+  return Object.entries(metricsByParty).map(([party, metrics]: any) => ({
+    party,
+    ...(metrics || {}),
+  }))
+})
+
+const effectiveFlFramework = computed(() => {
+  return federatedResultJson.value?.framework || taskParams.value?.framework || 'secretflow'
+})
+
+const effectiveFlModelType = computed(() => {
+  return federatedResultJson.value?.model_type || taskParams.value?.model_type || 'FLModel_torch_mlp_binary_classifier'
+})
+
+const effectiveFlModelTypeText = computed(() => {
+  const value = effectiveFlModelType.value
+  if (value === 'FLModel_torch_mlp_binary_classifier') return 'FLModel + Torch MLP 二分类模型'
+  if (value === 'SSRegression_logistic_regression') return 'SSRegression 逻辑回归模型'
+  return getModelTypeText(value)
+})
+
+const effectiveFlAggregator = computed(() => {
+  return federatedResultJson.value?.aggregator || federatedMetricsJson.value?.aggregator || 'SparsePlainAggregator'
+})
+
+const hasSuccessfulChainAnchor = computed(() => {
+  return chainAnchorResult.value?.chain_record?.status === 'success'
+})
+
+const anchorButtonText = computed(() => {
+  return hasSuccessfulChainAnchor.value ? '已完成存证' : '结果存证'
 })
 
 function formatMetricNumber(value: any) {

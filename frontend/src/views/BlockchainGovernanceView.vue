@@ -105,7 +105,11 @@
               </template>
             </el-table-column>
 
-            <el-table-column prop="chain_type" label="链类型" width="150" />
+            <el-table-column label="链类型" width="150">
+              <template #default="{ row }">
+                {{ formatChainType(row.chain_type) }}
+              </template>
+            </el-table-column>
 
             <el-table-column label="链上凭证" width="120">
               <template #default="{ row }">
@@ -225,7 +229,7 @@
             {{ formatBizType(currentChainRecord.biz_type) }}
           </el-descriptions-item>
 
-          <el-descriptions-item label="业务ID">
+          <el-descriptions-item :label="getBizIdLabel(currentChainRecord.biz_type)">
             {{ currentChainRecord.biz_id || '-' }}
           </el-descriptions-item>
 
@@ -320,7 +324,7 @@
           </div>
           <div class="verify-item">
             <span class="verify-dot" />
-            <span>当前阶段为 Mock 存证，第十八阶段接入 FISCO BCOS 后替换为真实链返回值。</span>
+            <span>{{ getChainVerifyText(currentChainRecord) }}</span>
           </div>
         </div>
 
@@ -664,6 +668,37 @@ function formatStatus(status: string) {
   }
 
   return map[status] || status || '-'
+}
+
+function formatChainType(type: string) {
+  const map: Record<string, string> = {
+    fisco_bcos: 'FISCO BCOS',
+    mock_fisco_bcos: 'Mock FISCO BCOS',
+  }
+
+  return map[type] || type || '-'
+}
+
+function getBizIdLabel(bizType: string) {
+  const map: Record<string, string> = {
+    task: '任务ID',
+    task_result: '结果ID',
+    audit_log: '审计日志ID',
+  }
+
+  return map[bizType] || '业务ID'
+}
+
+function getChainVerifyText(record: any) {
+  if (record?.chain_type === 'fisco_bcos') {
+    return '当前记录为 FISCO BCOS 真实链上存证，交易哈希、区块高度和合约地址均来自链上返回结果。'
+  }
+
+  if (record?.chain_type === 'mock_fisco_bcos') {
+    return '当前记录为历史 Mock 存证，仅用于开发阶段留痕；后续新增存证已切换为 FISCO BCOS 真实链上返回值。'
+  }
+
+  return '当前记录可通过交易哈希、区块高度和合约地址进行链上核验。'
 }
 
 function getStatusTagType(status: string) {

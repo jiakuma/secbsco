@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h2>任务中心</h2>
-        <p>统一管理联合统计任务和联邦学习任务模板</p>
+        <p>统一管理联合统计任务、联邦学习训练任务及结果存证</p>
       </div>
 
       <div class="header-actions">
@@ -189,7 +189,7 @@
             />
           </el-select>
           <div class="form-tip">
-            第十四阶段已开放 T2 联邦学习任务模板；当前仅保存配置，第十五阶段再接入 Mock 联邦训练。
+            已接入 Alice 18181 SecretFlow 联邦训练服务；创建任务后可在详情页发起真实联邦训练，并支持训练结果链上存证。
           </div>
         </el-form-item>
 
@@ -270,10 +270,12 @@
           <div class="fl-template-box">
             <div class="fl-template-title">T2 联邦学习配置预览</div>
             <div class="fl-template-line">联邦模式：横向联邦学习</div>
-            <div class="fl-template-line">模型类型：时空预测 Mock 模型</div>
-            <div class="fl-template-line">主表：IDSR_INDIVIDUAL_DIS</div>
-            <div class="fl-template-line">溯源表：SPATIOTEMPORAL_TRACE</div>
-            <div class="fl-template-line">隐私配置：不导出原始数据，启用安全聚合与区块链审计</div>
+            <div class="fl-template-line">训练框架：SecretFlow</div>
+            <div class="fl-template-line">模型类型：FLModel + Torch MLP 二分类模型</div>
+            <div class="fl-template-line">聚合策略：fed_avg_w</div>
+            <div class="fl-template-line">聚合方式：SparsePlainAggregator（验证版）</div>
+            <div class="fl-template-line">训练数据：Alice / Bob 本地样本数据</div>
+            <div class="fl-template-line">数据边界：原始数据不出本地，仅返回训练指标、结果哈希和存证摘要</div>
           </div>
         </el-form-item>
 
@@ -536,6 +538,57 @@ function handleTaskTypeChange() {
   }
 }
 
+function buildRealFederatedLearningParamsJson(scenarioCode: ScenarioCode) {
+  return {
+    task_type: 'federated_learning',
+    framework: 'secretflow',
+    model_type: 'FLModel_torch_mlp_binary_classifier',
+    federated_mode: 'horizontal',
+    train_mode: 'horizontal',
+    partition_type: 'horizontal',
+    strategy: 'fed_avg_w',
+    aggregator: 'SparsePlainAggregator',
+    algorithm_type: 'prediction',
+    scenario_code: scenarioCode,
+    scenario_name: '跨区县传染病时空预测与疫情溯源',
+    train_config: {
+      epochs: 5,
+      batch_size: 32,
+      learning_rate: 0.01,
+    },
+    secretflow_fl: {
+      alice_csv: '/data/alice_flu_fl_train.csv',
+      bob_csv: '/data/bob_flu_fl_train.csv',
+    },
+    dataset_config: {
+      id_column: 'case_id_hash',
+      main_table: 'IDSR_INDIVIDUAL_DIS',
+      label_column: 'risk_label',
+      feature_columns: [
+        'disease_code',
+        'onset_date',
+        'diagnosis_date',
+        'spatial_grid_id',
+        'age_group',
+        'gender',
+        'occupation_code',
+      ],
+    },
+    trace_config: {
+      enabled: true,
+      trace_table: 'SPATIOTEMPORAL_TRACE',
+      trace_method: 'private_intersection',
+      intersection_field: 'spatial_grid_14d',
+    },
+    privacy_config: {
+      raw_data_export: false,
+      blockchain_audit: true,
+      aggregator: 'SparsePlainAggregator',
+      note: '当前为 SecretFlow 横向联邦学习训练验证版，使用 SparsePlainAggregator 聚合训练参数。',
+    },
+  }
+}
+
 async function handleCreate() {
   if (!createFormRef.value) return
 
@@ -570,10 +623,12 @@ async function handleCreate() {
         description: createForm.description || undefined,
         stat_start_time: isFederated ? undefined : statRange.value?.[0] || undefined,
         stat_end_time: isFederated ? undefined : statRange.value?.[1] || undefined,
-        params_json: buildTaskParamsJson(
-          createForm.task_type,
-          isFederated ? createForm.scenario_code : undefined,
-        ),
+        params_json: isFederated
+          ? buildRealFederatedLearningParamsJson(createForm.scenario_code)
+          : buildTaskParamsJson(
+              createForm.task_type,
+              undefined,
+            ),
       }
 
       await createTask(payload)
@@ -610,7 +665,7 @@ async function handleRun(row: any) {
   try {
     await ElMessageBox.confirm(
       isFlTask
-        ? `确认执行 Mock 联邦训练任务「${row.task_name || row.task_code}」吗？`
+        ? `确认执行 SecretFlow 联邦训练任务「${row.task_name || row.task_code}」吗？`
         : `确认执行任务「${row.task_name || row.task_code}」吗？`,
       '执行确认',
       {
@@ -624,13 +679,13 @@ async function handleRun(row: any) {
 
     await runTask(row.id)
 
-    ElMessage.success(isFlTask ? 'Mock 联邦训练执行成功' : '任务执行成功')
+    ElMessage.success(isFlTask ? 'SecretFlow 联邦训练执行成功' : '任务执行成功')
 
     await loadTasks()
   } catch (error: any) {
     if (error !== 'cancel') {
       console.error(error)
-      ElMessage.error(isFlTask ? 'Mock 联邦训练执行失败，请检查训练节点配置' : '任务执行失败，请检查任务参与方配置')
+      ElMessage.error(isFlTask ? 'SecretFlow 联邦训练执行失败，请检查 Alice 18181、Ray 集群和训练节点配置' : '任务执行失败，请检查任务参与方配置')
     }
   } finally {
     runningTaskId.value = null
@@ -642,7 +697,7 @@ async function goResult(row: any) {
   const isFlTask = isFederatedLearningTask(row)
 
   if (row.status !== 'success') {
-    ElMessage.warning(isFlTask ? '当前任务暂无训练结果，请先执行 Mock 联邦训练' : '当前任务暂无统计结果，请先执行任务')
+    ElMessage.warning(isFlTask ? '当前任务暂无训练结果，请先执行 SecretFlow 联邦训练' : '当前任务暂无统计结果，请先执行任务')
     return
   }
 
@@ -651,7 +706,7 @@ async function goResult(row: any) {
     router.push(`/tasks/${row.id}?tab=result`)
   } catch (error) {
     console.error(error)
-    ElMessage.warning(isFlTask ? '当前任务暂无训练结果，请先执行 Mock 联邦训练' : '当前任务暂无统计结果，请先执行任务')
+    ElMessage.warning(isFlTask ? '当前任务暂无训练结果，请先执行 SecretFlow 联邦训练' : '当前任务暂无统计结果，请先执行任务')
   }
 }
 

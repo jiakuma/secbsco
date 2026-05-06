@@ -2,12 +2,15 @@ import hashlib
 import json
 from datetime import datetime
 from typing import Any
+from urllib import error as url_error
+from urllib import request as url_request
 
 from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
+from app.core.config import settings
 from app.schemas.task_schema import (
     TaskCreate,
     TaskUpdate,
@@ -16,11 +19,14 @@ from app.schemas.task_schema import (
     TaskPartyUpdate,
 )
 from app.services import task_service
+from app.services.secretflow_stat_service import SecretFlowStatService
+from app.services.secretflow_fl_service import SecretFlowFLService
 from app.services.task_result_service import TaskResultService
 from app.schemas.audit_log_schema import AuditLogCreate
 from app.services.audit_log_service import AuditLogService
 from app.models.chain_record import ChainRecord
 from app.models.task_result import TaskResult
+from app.models.task_party import TaskParty
 
 router = APIRouter(
     prefix="/api/tasks",
@@ -95,6 +101,465 @@ def _safe_json_dict(value: Any) -> dict:
     return {}
 
 
+
+
+def _get_stat_date_str(value, default_value: str) -> str:
+    """
+    将 task.stat_start_time / stat_end_time 转成 YYYY-MM-DD。
+    """
+    if value is None:
+        return default_value
+
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d")
+
+    text = str(value)
+    return text[:10] if len(text) >= 10 else default_value
+
+
+def _build_secretflow_stat_request(task) -> dict:
+    """
+    根据任务参数组装 SecretFlow 联合统计请求。
+
+    说明：
+    - 第十九阶段 MVP 默认跑 Alice/Bob 两方流感样病例统计；
+    - CSV 路径优先从 params_json.secretflow 读取，未配置则使用 settings 默认值；
+    - 时间范围优先使用任务 stat_start_time / stat_end_time。
+    """
+    params_json = _safe_json_dict(getattr(task, "params_json", None))
+    secretflow_params = _safe_json_dict(params_json.get("secretflow"))
+
+    start_date = (
+        params_json.get("start_date")
+        or secretflow_params.get("start_date")
+        or _get_stat_date_str(task.stat_start_time, settings.SECRETFLOW_DEFAULT_START_DATE)
+    )
+    end_date = (
+        params_json.get("end_date")
+        or secretflow_params.get("end_date")
+        or _get_stat_date_str(task.stat_end_time, settings.SECRETFLOW_DEFAULT_END_DATE)
+    )
+    syndrome_type = (
+        params_json.get("syndrome_type")
+        or secretflow_params.get("syndrome_type")
+        or settings.SECRETFLOW_DEFAULT_SYNDROME_TYPE
+    )
+
+    return {
+        "task_id": task.task_code or f"task_{task.id}",
+        "start_date": start_date,
+        "end_date": end_date,
+        "syndrome_type": syndrome_type,
+        "alice_csv": secretflow_params.get("alice_csv") or settings.SECRETFLOW_ALICE_CSV,
+        "bob_csv": secretflow_params.get("bob_csv") or settings.SECRETFLOW_BOB_CSV,
+    }
+
+
+
+
+def _build_secretflow_fl_request(task) -> dict:
+    """
+    根据任务参数组装 SecretFlow 联邦学习训练请求。
+
+    说明：
+    - 第一版优先接入 Alice 端 18181 横向联邦学习训练服务；
+    - 参数优先从 params_json.secretflow_fl / params_json.train_config 读取；
+    - 未配置时使用 settings 中的默认训练参数。
+    """
+    params_json = _safe_json_dict(getattr(task, "params_json", None))
+    secretflow_fl_params = _safe_json_dict(params_json.get("secretflow_fl"))
+    train_config = _safe_json_dict(params_json.get("train_config"))
+
+    train_mode = (
+        params_json.get("train_mode")
+        or params_json.get("partition_type")
+        or secretflow_fl_params.get("train_mode")
+        or secretflow_fl_params.get("partition_type")
+        or "horizontal"
+    )
+
+    epochs = (
+        train_config.get("epochs")
+        or secretflow_fl_params.get("epochs")
+        or getattr(settings, "SECRETFLOW_FL_EPOCHS", 5)
+    )
+    batch_size = (
+        train_config.get("batch_size")
+        or secretflow_fl_params.get("batch_size")
+        or getattr(settings, "SECRETFLOW_FL_BATCH_SIZE", 32)
+    )
+    learning_rate = (
+        train_config.get("learning_rate")
+        or secretflow_fl_params.get("learning_rate")
+        or getattr(settings, "SECRETFLOW_FL_LEARNING_RATE", 0.001)
+    )
+
+    return {
+        "task_id": task.task_code or f"task_{task.id}",
+        "train_mode": train_mode,
+        "alice_csv": (
+            secretflow_fl_params.get("alice_csv")
+            or params_json.get("alice_csv")
+            or getattr(settings, "SECRETFLOW_FL_ALICE_CSV", "/data/alice_flu_fl_train.csv")
+        ),
+        "bob_csv": (
+            secretflow_fl_params.get("bob_csv")
+            or params_json.get("bob_csv")
+            or getattr(settings, "SECRETFLOW_FL_BOB_CSV", "/data/bob_flu_fl_train.csv")
+        ),
+        "epochs": int(epochs),
+        "batch_size": int(batch_size),
+        "learning_rate": float(learning_rate),
+    }
+
+
+def _task_result_to_dict(task_result: TaskResult) -> dict:
+    return {
+        "id": task_result.id,
+        "task_id": task_result.task_id,
+        "result_json": task_result.result_json,
+        "metrics_json": task_result.metrics_json,
+        "result_hash": task_result.result_hash,
+        "status": task_result.status,
+        "error_message": task_result.error_message,
+        "created_at": task_result.created_at,
+        "updated_at": task_result.updated_at,
+    }
+
+
+def _create_or_update_secretflow_stat_result(
+    db: Session,
+    task,
+    sf_payload: dict,
+) -> TaskResult:
+    """
+    将 SecretFlow 联合统计结果写入 task_result。
+
+    注意：
+    - result_hash 使用 Alice SecretFlow 服务返回的稳定摘要；
+    - 不在这里上链，上链继续复用 /api/tasks/{task_id}/chain-anchor。
+    """
+    result_json = _safe_json_dict(sf_payload.get("result"))
+
+    metrics_json = {
+        "case_count": result_json.get("case_count"),
+        "sampled_count": result_json.get("sampled_count"),
+        "positive_count": result_json.get("positive_count"),
+        "positive_rate": result_json.get("positive_rate"),
+        "unique_patient_count": result_json.get("unique_patient_count"),
+        "unique_patient_count_mode": result_json.get("unique_patient_count_mode"),
+        "local_dedup_patient_count_sum": result_json.get("local_dedup_patient_count_sum"),
+        "framework": result_json.get("framework"),
+        "scenario_code": result_json.get("scenario_code"),
+        "scenario_name": result_json.get("scenario_name"),
+    }
+
+    result_hash = sf_payload.get("result_hash") or _calc_sha256(result_json)
+
+    task_result = (
+        db.query(TaskResult)
+        .filter(TaskResult.task_id == task.id)
+        .first()
+    )
+
+    now = datetime.now()
+
+    if task_result:
+        task_result.result_json = result_json
+        task_result.metrics_json = metrics_json
+        task_result.result_hash = result_hash
+        task_result.status = "success"
+        task_result.error_message = None
+        task_result.updated_at = now
+    else:
+        task_result = TaskResult(
+            task_id=task.id,
+            result_json=result_json,
+            metrics_json=metrics_json,
+            result_hash=result_hash,
+            status="success",
+            error_message=None,
+        )
+        db.add(task_result)
+
+    return task_result
+
+
+
+
+def _create_or_update_secretflow_fl_result(
+    db: Session,
+    task,
+    sf_payload: dict,
+) -> TaskResult:
+    """
+    将 SecretFlow 联邦学习训练结果写入 task_result。
+
+    注意：
+    - 这里不写模型参数、不写原始数据；
+    - result_hash 优先使用 Alice 端 18181 服务返回的训练结果摘要；
+    - 后续上链继续复用 /api/tasks/{task_id}/chain-anchor。
+    """
+    params_json = _safe_json_dict(getattr(task, "params_json", None))
+    result_json = _safe_json_dict(sf_payload.get("result"))
+
+    metrics = _safe_json_dict(result_json.get("metrics"))
+    training_params = _safe_json_dict(result_json.get("training_params"))
+
+    participants = result_json.get("participants") or []
+    if not isinstance(participants, list):
+        participants = []
+
+    summary = _safe_json_dict(result_json.get("summary"))
+    summary.update(
+        {
+            "final_accuracy": summary.get("final_accuracy") or metrics.get("accuracy"),
+            "final_auc": summary.get("final_auc") or metrics.get("auc"),
+            "final_precision": summary.get("final_precision") or metrics.get("precision"),
+            "final_recall": summary.get("final_recall") or metrics.get("recall"),
+            "final_f1": summary.get("final_f1") or metrics.get("f1"),
+            "round_count": summary.get("round_count") or training_params.get("epochs"),
+            "participant_count": summary.get("participant_count") or len(participants),
+            "sample_count": summary.get("sample_count") or metrics.get("sample_count"),
+            "privacy_mode": summary.get("privacy_mode")
+            or result_json.get("aggregator")
+            or result_json.get("partition_type"),
+            "raw_data_export": False,
+        }
+    )
+
+    result_json.update(
+        {
+            "task_type": "federated_learning",
+            "task_id": task.task_code or f"task_{task.id}",
+            "scenario_code": (
+                result_json.get("scenario_code")
+                or params_json.get("scenario_code")
+                or "flu_federated_learning"
+            ),
+            "scenario_name": (
+                result_json.get("scenario_name")
+                or params_json.get("scenario_name")
+                or "流感样病例联邦学习训练"
+            ),
+            "framework": result_json.get("framework") or "secretflow",
+            "summary": summary,
+        }
+    )
+
+    metrics_json = {
+        "final_accuracy": summary.get("final_accuracy"),
+        "final_auc": summary.get("final_auc"),
+        "final_precision": summary.get("final_precision"),
+        "final_recall": summary.get("final_recall"),
+        "final_f1": summary.get("final_f1"),
+        "round_count": summary.get("round_count"),
+        "participant_count": summary.get("participant_count"),
+        "sample_count": summary.get("sample_count"),
+        "privacy_mode": summary.get("privacy_mode"),
+        "raw_data_export": summary.get("raw_data_export"),
+        "framework": result_json.get("framework"),
+        "model_type": result_json.get("model_type"),
+        "partition_type": result_json.get("partition_type"),
+        "strategy": result_json.get("strategy"),
+        "aggregator": result_json.get("aggregator"),
+    }
+
+    result_hash = (
+        sf_payload.get("result_hash")
+        or result_json.get("result_hash")
+        or _calc_sha256(result_json)
+    )
+
+    task_result = (
+        db.query(TaskResult)
+        .filter(TaskResult.task_id == task.id)
+        .first()
+    )
+
+    now = datetime.now()
+
+    if task_result:
+        task_result.result_json = result_json
+        task_result.metrics_json = metrics_json
+        task_result.result_hash = result_hash
+        task_result.status = "success"
+        task_result.error_message = None
+        task_result.updated_at = now
+    else:
+        task_result = TaskResult(
+            task_id=task.id,
+            result_json=result_json,
+            metrics_json=metrics_json,
+            result_hash=result_hash,
+            status="success",
+            error_message=None,
+        )
+        db.add(task_result)
+
+    return task_result
+
+
+def _run_secretflow_federated_learning_task(db: Session, task) -> dict:
+    """
+    执行 SecretFlow 联邦学习训练任务并写入 task_result。
+    """
+    parties = (
+        db.query(TaskParty)
+        .filter(TaskParty.task_id == task.id)
+        .order_by(TaskParty.id.asc())
+        .all()
+    )
+
+    if not parties:
+        raise HTTPException(status_code=400, detail="联邦学习任务尚未配置训练节点，不能执行")
+
+    task.status = "running"
+    for party in parties:
+        party.status = "running"
+        party.error_message = None
+
+    db.commit()
+
+    try:
+        fl_request = _build_secretflow_fl_request(task)
+
+        sf_payload = SecretFlowFLService.run_flu_fl_train(
+            task_id=fl_request["task_id"],
+            train_mode=fl_request["train_mode"],
+            alice_csv=fl_request["alice_csv"],
+            bob_csv=fl_request["bob_csv"],
+            epochs=fl_request["epochs"],
+            batch_size=fl_request["batch_size"],
+            learning_rate=fl_request["learning_rate"],
+        )
+
+        task_result = _create_or_update_secretflow_fl_result(
+            db=db,
+            task=task,
+            sf_payload=sf_payload,
+        )
+
+        task.status = "success"
+        for party in parties:
+            party.status = "success"
+            party.error_message = None
+
+        if hasattr(task, "updated_at"):
+            task.updated_at = datetime.now()
+
+        db.commit()
+        db.refresh(task)
+        db.refresh(task_result)
+
+        return {
+            "task": task_service.task_to_dict(task),
+            "parties": [task_service.party_to_dict(party) for party in parties],
+            "result": _task_result_to_dict(task_result),
+            "secretflow_fl_request": fl_request,
+            "secretflow_fl_response": {
+                "success": sf_payload.get("success"),
+                "message": sf_payload.get("message"),
+                "task_id": sf_payload.get("task_id"),
+                "timestamp": sf_payload.get("timestamp"),
+                "train_mode": sf_payload.get("train_mode"),
+                "result_hash": sf_payload.get("result_hash"),
+            },
+            "message": "SecretFlow 联邦学习训练任务执行成功，已生成训练结果",
+        }
+
+    except Exception as exc:
+        task.status = "failed"
+        for party in parties:
+            party.status = "failed"
+            party.error_message = str(exc)
+
+        if hasattr(task, "updated_at"):
+            task.updated_at = datetime.now()
+
+        db.commit()
+        raise
+
+
+def _run_secretflow_statistic_task(db: Session, task) -> dict:
+    """
+    执行 SecretFlow 联合统计任务并写入 task_result。
+    """
+    parties = (
+        db.query(TaskParty)
+        .filter(TaskParty.task_id == task.id)
+        .order_by(TaskParty.id.asc())
+        .all()
+    )
+
+    if not parties:
+        raise HTTPException(status_code=400, detail="任务尚未配置参与方，不能执行")
+
+    task.status = "running"
+    for party in parties:
+        party.status = "running"
+        party.error_message = None
+
+    db.commit()
+
+    try:
+        sf_request = _build_secretflow_stat_request(task)
+
+        sf_payload = SecretFlowStatService.run_flu_stat(
+            task_id=sf_request["task_id"],
+            start_date=sf_request["start_date"],
+            end_date=sf_request["end_date"],
+            syndrome_type=sf_request["syndrome_type"],
+            alice_csv=sf_request["alice_csv"],
+            bob_csv=sf_request["bob_csv"],
+        )
+
+        task_result = _create_or_update_secretflow_stat_result(
+            db=db,
+            task=task,
+            sf_payload=sf_payload,
+        )
+
+        task.status = "success"
+        for party in parties:
+            party.status = "success"
+            party.error_message = None
+
+        if hasattr(task, "updated_at"):
+            task.updated_at = datetime.now()
+
+        db.commit()
+        db.refresh(task)
+        db.refresh(task_result)
+
+        return {
+            "task": task_service.task_to_dict(task),
+            "parties": [task_service.party_to_dict(party) for party in parties],
+            "result": _task_result_to_dict(task_result),
+            "secretflow_request": sf_request,
+            "secretflow_response": {
+                "success": sf_payload.get("success"),
+                "message": sf_payload.get("message"),
+                "task_id": sf_payload.get("task_id"),
+                "timestamp": sf_payload.get("timestamp"),
+                "result_hash": sf_payload.get("result_hash"),
+            },
+            "message": "SecretFlow 联合统计任务执行成功，已生成统计结果",
+        }
+
+    except Exception as exc:
+        task.status = "failed"
+        for party in parties:
+            party.status = "failed"
+            party.error_message = str(exc)
+
+        if hasattr(task, "updated_at"):
+            task.updated_at = datetime.now()
+
+        db.commit()
+        raise
+
+
 def _calc_sha256(data: dict) -> str:
     """
     对摘要内容计算 SHA256。
@@ -104,13 +569,94 @@ def _calc_sha256(data: dict) -> str:
     ).hexdigest()
 
 
-def _build_mock_tx_hash(task_id: int, result_id: int, content_hash: str, now: datetime) -> str:
+def _call_fisco_anchor_service(anchor_task_id: str, digest: str, timestamp: int) -> dict:
     """
-    生成 Mock 交易哈希。
-    后续接入真实 FISCO BCOS 时，替换为真实 tx_hash。
+    调用 Alice 节点上的 FISCO BCOS 上链服务。
+
+    当前 FastAPI 运行在 Windows 本地，不直接加载 FISCO BCOS Python SDK，
+    只通过 HTTP 调用 Alice 的 fisco_anchor_service。
     """
-    raw = f"mock_fisco_bcos|task_result|{task_id}|{result_id}|{content_hash}|{now.isoformat()}"
-    return "0x" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    base_url = settings.FISCO_ANCHOR_SERVICE_URL.rstrip("/")
+    url = f"{base_url}/anchor/result"
+
+    payload = {
+        "task_id": anchor_task_id,
+        "digest": digest,
+        "timestamp": timestamp,
+    }
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-API-Key": settings.FISCO_ANCHOR_API_KEY,
+    }
+
+    req = url_request.Request(
+        url=url,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+
+    try:
+        with url_request.urlopen(req, timeout=settings.FISCO_ANCHOR_TIMEOUT_SECONDS) as resp:
+            resp_body = resp.read().decode("utf-8")
+    except url_error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="ignore")
+        raise HTTPException(
+            status_code=502,
+            detail=f"FISCO 上链服务返回异常: HTTP {exc.code}, {error_body}",
+        ) from exc
+    except url_error.URLError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"无法连接 FISCO 上链服务: {exc.reason}",
+        ) from exc
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="调用 FISCO 上链服务超时",
+        ) from exc
+
+    try:
+        data = json.loads(resp_body)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"FISCO 上链服务返回非 JSON 内容: {resp_body}",
+        ) from exc
+
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="FISCO 上链服务返回格式错误")
+
+    if not data.get("success"):
+        raise HTTPException(
+            status_code=502,
+            detail=f"FISCO 上链失败: {data}",
+        )
+
+    if data.get("verify_result") is False:
+        raise HTTPException(
+            status_code=502,
+            detail=f"FISCO 上链后校验失败: {data}",
+        )
+
+    return data
+
+
+def _extract_chain_tx_hash(anchor_response: dict) -> str | None:
+    raw_receipt = _safe_json_dict(anchor_response.get("raw_receipt"))
+    return anchor_response.get("tx_hash") or raw_receipt.get("transactionHash")
+
+
+def _extract_chain_block_number(anchor_response: dict) -> int | None:
+    raw_receipt = _safe_json_dict(anchor_response.get("raw_receipt"))
+    block_number = anchor_response.get("block_number") or raw_receipt.get("blockNumber")
+    if block_number is None:
+        return None
+    try:
+        return int(block_number)
+    except Exception:
+        return None
 
 
 def _chain_record_to_dict(record: ChainRecord) -> dict:
@@ -205,9 +751,9 @@ def _build_task_run_audit_desc(data: dict) -> str:
     task_type = _get_task_type_from_run_data(data)
 
     if task_type == "federated_learning":
-        return "Mock 执行联邦学习训练任务并生成训练结果"
+        return "执行 SecretFlow 联邦学习训练任务并生成训练结果"
 
-    return "Mock 执行联合统计任务并生成统计结果"
+    return "执行 SecretFlow 联合统计任务并生成统计结果"
 
 
 def _build_task_run_audit_result(data: dict) -> dict:
@@ -561,24 +1107,21 @@ def delete_task_party(
 
 
 @router.post("/{task_id}/chain-anchor")
-def mock_anchor_task_result(
+def anchor_task_result(
     task_id: int,
     request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     """
-    Mock 任务结果存证。
+    任务结果真实上链存证。
 
-    当前阶段不接入真实 FISCO BCOS，只完成：
-    1. 结果摘要组装；
-    2. content_hash 生成；
-    3. mock tx_hash / block_number 生成；
-    4. chain_record 写入；
-    5. 审计日志写入。
-
-    后续第十八阶段接入真实 FISCO BCOS 时，
-    替换 tx_hash / block_number / contract_address 的生成逻辑即可。
+    当前实现方式：
+    1. FastAPI 查询任务和任务结果；
+    2. 组装任务结果摘要并计算 content_hash；
+    3. 调用 Alice 节点 fisco_anchor_service；
+    4. 使用真实返回的 tx_hash / block_number / contract_address 写入 chain_record；
+    5. 写入 TASK_RESULT_CHAIN_ANCHOR 审计日志。
     """
     task = task_service.get_task_or_404(db=db, task_id=task_id)
 
@@ -641,21 +1184,34 @@ def mock_anchor_task_result(
         }
 
     now = datetime.now()
-    tx_hash = _build_mock_tx_hash(
-        task_id=task.id,
-        result_id=task_result.id,
-        content_hash=content_hash,
-        now=now,
+    anchor_task_id = f"task_result_{task_result.id}"
+    anchor_timestamp = int(now.timestamp())
+
+    anchor_response = _call_fisco_anchor_service(
+        anchor_task_id=anchor_task_id,
+        digest=content_hash,
+        timestamp=anchor_timestamp,
     )
+
+    tx_hash = _extract_chain_tx_hash(anchor_response)
+    block_number = _extract_chain_block_number(anchor_response)
+    contract_address = (
+        anchor_response.get("contract_address")
+        or settings.FISCO_CONTRACT_ADDRESS
+    )
+    chain_type = anchor_response.get("chain_type") or settings.FISCO_CHAIN_TYPE
+
+    if not tx_hash:
+        raise HTTPException(status_code=502, detail="FISCO 上链服务未返回 tx_hash")
 
     chain_record = ChainRecord(
         biz_type="task_result",
         biz_id=str(task_result.id),
         content_hash=content_hash,
-        chain_type="mock_fisco_bcos",
+        chain_type=chain_type,
         tx_hash=tx_hash,
-        block_number=int(now.timestamp()),
-        contract_address="0xMockTaskResultAnchorContract",
+        block_number=block_number,
+        contract_address=contract_address,
         status="success",
         error_message=None,
     )
@@ -667,19 +1223,21 @@ def mock_anchor_task_result(
     chain_record_data = _chain_record_to_dict(chain_record)
 
     audit_result_json = {
-        "message": "Mock 任务结果存证成功",
+        "message": "任务结果真实上链存证成功",
         "task_id": task.id,
         "task_code": task.task_code,
         "task_name": task.task_name,
         "result_id": task_result.id,
         "result_hash": task_result.result_hash,
         "content_hash": content_hash,
+        "chain_anchor_task_id": anchor_task_id,
         "chain_record_id": chain_record.id,
         "chain_type": chain_record.chain_type,
         "tx_hash": chain_record.tx_hash,
         "block_number": chain_record.block_number,
         "contract_address": chain_record.contract_address,
         "status": chain_record.status,
+        "verify_result": anchor_response.get("verify_result"),
     }
 
     write_task_audit_log(
@@ -690,12 +1248,14 @@ def mock_anchor_task_result(
         object_type="chain_record",
         object_id=str(chain_record.id),
         task_id=task.id,
-        operation_desc="Mock 任务结果存证",
+        operation_desc="任务结果真实上链存证",
         request_json={
             "task_id": task.id,
             "result_id": task_result.id,
             "biz_type": "task_result",
             "content_hash": content_hash,
+            "chain_anchor_task_id": anchor_task_id,
+            "anchor_service_url": settings.FISCO_ANCHOR_SERVICE_URL,
         },
         result_json=audit_result_json,
     )
@@ -703,8 +1263,18 @@ def mock_anchor_task_result(
     data = {
         "anchored": True,
         "duplicated": False,
-        "message": "Mock 任务结果存证成功",
+        "message": "任务结果真实上链存证成功",
         "anchor_payload": anchor_payload,
+        "anchor_response": {
+            "success": anchor_response.get("success"),
+            "chain_type": chain_type,
+            "contract_address": contract_address,
+            "tx_hash": tx_hash,
+            "block_number": block_number,
+            "status": anchor_response.get("status"),
+            "verify_result": anchor_response.get("verify_result"),
+            "chain_result": anchor_response.get("chain_result"),
+        },
         "chain_record": chain_record_data,
     }
 
@@ -716,34 +1286,33 @@ def mock_anchor_task_result(
 
 
 @router.post("/{task_id}/run")
-def mock_run_task(
+def run_task(
     task_id: int,
     request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     """
-    Mock 执行任务。
+    执行任务。
 
-    说明：
-    1. 联合统计任务：task_service 负责执行状态流转，TaskResultService 负责生成统计结果；
-    2. 联邦学习任务：task_service 内部直接生成 Mock 联邦训练结果；
-    3. 这里根据 data 中是否已有 result 判断是否还需要生成联合统计结果。
+    第二十三阶段：
+    - statistic：调用 Alice SecretFlow 联合统计服务，生成真实联合统计结果；
+    - federated_learning：调用 Alice SecretFlow 联邦训练服务，生成真实训练结果。
     """
-    data = task_service.mock_run_task(
-        db=db,
-        task_id=task_id,
-    )
+    task = task_service.get_task_or_404(db=db, task_id=task_id)
+    params_json = _safe_json_dict(getattr(task, "params_json", None))
+    task_type = params_json.get("task_type") or "statistic"
 
-    # 如果 task_service 已经生成 result，说明是联邦学习任务，不能再生成联合统计结果
-    if not data.get("result"):
-        result = TaskResultService.create_or_update_mock_result(
+    if task_type == "federated_learning":
+        data = _run_secretflow_federated_learning_task(
             db=db,
-            task_id=task_id,
+            task=task,
         )
-
-        data["result"] = TaskResultService.build_result_info(result)
-        data["message"] = "Mock 联合统计任务执行成功，已生成统计结果"
+    else:
+        data = _run_secretflow_statistic_task(
+            db=db,
+            task=task,
+        )
 
     operation_desc = _build_task_run_audit_desc(data)
     audit_result_json = _build_task_run_audit_result(data)
@@ -760,6 +1329,11 @@ def mock_run_task(
         request_json={
             "task_id": task_id,
             "task_type": audit_result_json.get("task_type"),
+            "executor": (
+                "secretflow_fl"
+                if audit_result_json.get("task_type") == "federated_learning"
+                else "secretflow"
+            ),
         },
         result_json=audit_result_json,
     )
@@ -769,3 +1343,4 @@ def mock_run_task(
         "message": "success",
         "data": data,
     }
+
