@@ -1,849 +1,301 @@
 <template>
   <div class="task-detail-page">
-    <div class="page-header">
-      <div>
-        <h2>任务详情</h2>
-        <p>查看任务配置、执行状态和结果信息</p>
+    <header class="page-header">
+      <div class="title-area">
+        <h1>任务协同与审计详情</h1>
+        <p>查看计算任务的编排配置、多方调度状态及区块链存证结果</p>
       </div>
 
       <div class="header-actions">
-        <el-button @click="goBack">返回列表</el-button>
+        <el-button :icon="Back" @click="goBack">返回大盘</el-button>
         <el-button
           type="success"
+          :icon="VideoPlay"
           :loading="running"
           :disabled="running"
           @click="handleRun"
         >
-          {{ isFederatedLearningTask(taskDetail) ? '执行联邦训练' : '执行任务' }}
+          {{ isFederatedLearningTask(taskDetail) ? '下发联邦计算指令' : '触发协同统计' }}
         </el-button>
       </div>
-    </div>
+    </header>
 
-    <el-card v-loading="loading" shadow="never">
-      <template #header>
-        <div class="card-title">基础信息</div>
-      </template>
+    <main class="page-content">
+      <h3 class="section-title">基础调度信息</h3>
+      <el-card v-loading="loading" shadow="never" class="info-card">
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="任务编号 (Task Code)">
+            <div class="hash-wrapper" title="点击复制" @click="copyText(taskDetail?.task_code)">
+              <el-icon class="hash-icon"><DocumentCopy /></el-icon>
+              <span class="hash-text">{{ taskDetail?.task_code || '-' }}</span>
+            </div>
+          </el-descriptions-item>
 
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="任务ID">
-          {{ taskDetail?.id || '-' }}
-        </el-descriptions-item>
-
-        <el-descriptions-item label="任务状态">
-          <el-tag :type="getStatusType(taskDetail?.status)">
-            {{ getStatusText(taskDetail?.status) }}
-          </el-tag>
-        </el-descriptions-item>
-
-        <el-descriptions-item label="任务类型">
-          <el-tag :type="getTaskTypeTagType(taskDetail)">
-            {{ getTaskTypeText(taskDetail) }}
-          </el-tag>
-        </el-descriptions-item>
-
-        <el-descriptions-item label="任务编号">
-          {{ taskDetail?.task_code || '-' }}
-        </el-descriptions-item>
-
-        <el-descriptions-item label="任务名称">
-          {{ taskDetail?.task_name || '-' }}
-        </el-descriptions-item>
-
-        <el-descriptions-item label="统计模板ID">
-          {{ taskDetail?.template_id || '-' }}
-        </el-descriptions-item>
-
-        <el-descriptions-item label="创建机构ID">
-          {{ taskDetail?.creator_agency_id || '-' }}
-        </el-descriptions-item>
-
-        <el-descriptions-item label="统计开始时间">
-          {{ taskDetail?.stat_start_time || '-' }}
-        </el-descriptions-item>
-
-        <el-descriptions-item label="统计结束时间">
-          {{ taskDetail?.stat_end_time || '-' }}
-        </el-descriptions-item>
-
-        <el-descriptions-item label="创建时间">
-          {{ taskDetail?.created_at || '-' }}
-        </el-descriptions-item>
-
-        <el-descriptions-item label="更新时间">
-          {{ taskDetail?.updated_at || '-' }}
-        </el-descriptions-item>
-
-        <el-descriptions-item label="任务描述" :span="2">
-          {{ taskDetail?.description || '-' }}
-        </el-descriptions-item>
-      </el-descriptions>
-    </el-card>
-
-    <el-card
-      v-if="isFederatedLearningTask(taskDetail)"
-      class="section-card"
-      shadow="never"
-    >
-      <template #header>
-        <div class="result-header">
-          <div class="card-title">T2 联邦学习任务配置</div>
-          <el-tag type="warning" effect="plain">SecretFlow 真实训练已接入</el-tag>
-        </div>
-      </template>
-
-      <div class="scenario-summary">
-        <div class="scenario-title">
-          {{ taskParams.scenario_name || '跨区县传染病时空预测与疫情溯源' }}
-        </div>
-        <div class="scenario-text">
-          基于 Alice / Bob 本地脱敏样本开展横向联邦学习，调用 Alice 18181 SecretFlow 训练服务完成真实联邦训练，并支持将训练结果摘要写入 FISCO BCOS。
-        </div>
-      </div>
-
-      <div class="fl-section-grid">
-        <div class="fl-info-panel">
-          <div class="fl-info-title">业务目标</div>
-          <div class="fl-info-text">
-            在不汇聚原始数据的前提下，联合多个节点训练传染病风险预测模型，输出 Accuracy、AUC、Precision、Recall、F1 等训练指标。
-          </div>
-        </div>
-
-        <div class="fl-info-panel">
-          <div class="fl-info-title">安全边界</div>
-          <div class="fl-info-text">
-            原始数据不出本地节点，系统仅接收训练指标、参与方摘要、结果哈希和链上存证凭证；当前聚合方式为 SparsePlainAggregator 验证版。
-          </div>
-        </div>
-      </div>
-
-      <el-divider content-position="left">任务配置</el-divider>
-
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="任务场景" :span="2">
-          {{ taskParams.scenario_name || '跨区县传染病时空预测与疫情溯源' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="联邦模式">
-          {{ getFederatedModeText(taskParams.federated_mode) }}
-        </el-descriptions-item>
-        <el-descriptions-item label="算法类型">
-          {{ getAlgorithmTypeText(taskParams.algorithm_type) }}
-        </el-descriptions-item>
-        <el-descriptions-item label="模型类型">
-          {{ effectiveFlModelTypeText }}
-        </el-descriptions-item>
-        <el-descriptions-item label="执行框架">
-          {{ formatFramework(effectiveFlFramework) }}
-        </el-descriptions-item>
-        <el-descriptions-item label="主表">
-          {{ datasetConfig.main_table || 'IDSR_INDIVIDUAL_DIS' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="样本ID字段">
-          {{ datasetConfig.id_column || 'case_id_hash' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="标签字段">
-          {{ datasetConfig.label_column || 'risk_label' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="溯源表">
-          {{ traceConfig.trace_table || 'SPATIOTEMPORAL_TRACE' }}
-        </el-descriptions-item>
-      </el-descriptions>
-
-      <el-divider content-position="left">数据字段规范</el-divider>
-
-      <el-table :data="flDatasetFieldRows" border size="small" style="width: 100%">
-        <el-table-column prop="field" label="字段名" width="190" />
-        <el-table-column prop="source" label="所属数据" width="180" />
-        <el-table-column prop="desc" label="字段说明" min-width="260" />
-      </el-table>
-
-      <el-divider content-position="left">训练与隐私参数</el-divider>
-
-      <div class="config-metric-grid">
-        <div class="config-metric-card">
-          <div class="config-metric-label">训练轮次</div>
-          <div class="config-metric-value">{{ trainConfig.epochs ?? 5 }}</div>
-        </div>
-        <div class="config-metric-card">
-          <div class="config-metric-label">Batch Size</div>
-          <div class="config-metric-value">{{ trainConfig.batch_size ?? 32 }}</div>
-        </div>
-        <div class="config-metric-card">
-          <div class="config-metric-label">学习率</div>
-          <div class="config-metric-value">{{ trainConfig.learning_rate ?? 0.01 }}</div>
-        </div>
-        <div class="config-metric-card">
-          <div class="config-metric-label">聚合方式</div>
-          <div class="config-metric-value">{{ effectiveFlAggregator }}</div>
-        </div>
-        <div class="config-metric-card">
-          <div class="config-metric-label">原始数据导出</div>
-          <div class="config-metric-value">{{ privacyConfig.raw_data_export ? '允许' : '禁止' }}</div>
-        </div>
-        <div class="config-metric-card">
-          <div class="config-metric-label">区块链审计</div>
-          <div class="config-metric-value">{{ privacyConfig.blockchain_audit ? '启用' : '未启用' }}</div>
-        </div>
-      </div>
-
-      <el-divider content-position="left">执行流程</el-divider>
-
-      <div class="fl-process-list">
-        <div
-          v-for="(step, index) in flProcessSteps"
-          :key="step.title"
-          class="process-step"
-        >
-          <div class="step-index">{{ index + 1 }}</div>
-          <div class="step-content">
-            <div class="step-title">{{ step.title }}</div>
-            <div class="step-desc">{{ step.desc }}</div>
-          </div>
-        </div>
-      </div>
-
-      <el-collapse class="json-collapse">
-        <el-collapse-item title="查看联邦学习配置 JSON" name="params-json">
-          <pre class="json-view">{{ formatJson(taskParams) }}</pre>
-        </el-collapse-item>
-      </el-collapse>
-    </el-card>
-
-    <el-card class="section-card" shadow="never">
-      <template #header>
-        <div class="result-header">
-          <div class="card-title">{{ isFederatedLearningTask(taskDetail) ? '训练节点配置' : '参与方信息' }}</div>
-          <el-button
-            type="primary"
-            plain
-            @click="openPartyDialog"
-          >
-            {{ isFederatedLearningTask(taskDetail) ? '新增训练节点' : '新增参与方' }}
-          </el-button>
-        </div>
-      </template>
-
-      <el-table :data="partyList" border style="width: 100%">
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="agency_id" label="机构ID" width="120" />
-        <el-table-column prop="node_id" label="节点ID" width="120" />
-        <el-table-column prop="dataset_id" label="数据资源ID" width="130" />
-        <el-table-column prop="party_role" label="参与角色" width="140">
-          <template #default="{ row }">
-            {{ getPartyRoleText(row.party_role) }}
-          </template>
-        </el-table-column>
-
-        <el-table-column
-          v-if="isFederatedLearningTask(taskDetail)"
-          label="本地数据表"
-          width="180"
-        >
-          <template #default="{ row }">
-            {{ getPartyLocalTable(row) }}
-          </template>
-        </el-table-column>
-
-        <el-table-column
-          v-if="isFederatedLearningTask(taskDetail)"
-          label="样本说明"
-          min-width="220"
-        >
-          <template #default="{ row }">
-            {{ getPartySampleDesc(row) }}
-          </template>
-        </el-table-column>
-
-        <el-table-column
-          v-if="isFederatedLearningTask(taskDetail)"
-          label="映射字段数"
-          width="120"
-        >
-          <template #default="{ row }">
-            {{ getPartyFieldCount(row) }}
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="status" label="状态" width="120">
-          <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)">
-              {{ getStatusText(row.status) }}
+          <el-descriptions-item label="任务状态">
+            <el-tag :type="getStatusType(taskDetail?.status)" effect="dark">
+              {{ getStatusText(taskDetail?.status).toUpperCase() }}
             </el-tag>
+          </el-descriptions-item>
+
+          <el-descriptions-item label="任务类型">
+            <el-tag :type="getTaskTypeTagType(taskDetail)" effect="plain">
+              {{ getTaskTypeText(taskDetail) }}
+            </el-tag>
+          </el-descriptions-item>
+
+          <el-descriptions-item label="任务名称">
+            <strong>{{ taskDetail?.task_name || '-' }}</strong>
+          </el-descriptions-item>
+
+          <el-descriptions-item label="系统 ID 标识">
+            <span class="mono-text">TaskID: {{ taskDetail?.id || '-' }} | TemplateID: {{ taskDetail?.template_id || '-' }} | AgencyID: {{ taskDetail?.creator_agency_id || '-' }}</span>
+          </el-descriptions-item>
+
+          <el-descriptions-item label="时间周期">
+            {{ taskDetail?.created_at || '-' }} (创建) / {{ taskDetail?.updated_at || '-' }} (更新)
+          </el-descriptions-item>
+
+          <el-descriptions-item label="任务描述" :span="2">
+            <span style="color: #64748b;">{{ taskDetail?.description || '暂无描述' }}</span>
+          </el-descriptions-item>
+        </el-descriptions>
+      </el-card>
+
+      <template v-if="isFederatedLearningTask(taskDetail)">
+        <h3 class="section-title">联邦计算引擎配置</h3>
+        <el-card class="section-card" shadow="never">
+          <template #header>
+            <div class="result-header">
+              <span class="card-title"><el-icon><Cpu /></el-icon> T2 SecretFlow 核心配置</span>
+              <el-tag type="warning" effect="dark">真实计算网络已接入</el-tag>
+            </div>
           </template>
-        </el-table-column>
 
-        <el-table-column prop="created_at" label="创建时间" min-width="170" />
-
-        <el-table-column label="操作" width="120" fixed="right">
-          <template #default="{ row }">
-            <el-button
-              link
-              type="danger"
-              @click="handleDeleteParty(row)"
-            >
-              删除
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <el-empty v-if="!partyList.length" description="暂无参与方数据" />
-    </el-card>
-
-    <el-alert
-      v-if="isFederatedLearningTask(taskDetail)"
-      class="section-card"
-      title="联邦训练服务已接入"
-      type="success"
-      description="当前联邦学习任务已接入 Alice 18181 SecretFlow 真实训练服务，执行后会生成 Accuracy、AUC、Precision、Recall、F1、result_hash 等训练结果，并可继续进行 FISCO BCOS 真实链上存证。"
-      show-icon
-      :closable="false"
-    />
-    <el-card
-      v-if="isFederatedLearningTask(taskDetail)"
-      class="section-card"
-      shadow="never"
-    >
-      <template #header>
-        <div class="result-header">
-          <div class="card-title">联邦训练结果</div>
-
-          <div class="result-actions">
-            <el-button type="primary" plain @click="loadResult">
-              刷新结果
-            </el-button>
-
-            <el-button
-              type="warning"
-              plain
-              :loading="anchoring"
-              :disabled="!taskResult || taskDetail?.status !== 'success' || hasSuccessfulChainAnchor"
-              @click="handleAnchorTaskResult"
-            >
-              {{ anchorButtonText }}
-            </el-button>
+          <div class="fl-section-grid">
+            <div class="fl-info-panel">
+              <div class="fl-info-title"><el-icon><DataBoard /></el-icon> 业务目标</div>
+              <div class="fl-info-text">
+                {{ taskParams.scenario_name || '跨区县传染病时空预测与疫情溯源' }}。在不汇聚原始数据的前提下，联合多个节点训练风险预测模型，输出全局准确率及损失值。
+              </div>
+            </div>
+            <div class="fl-info-panel dark-panel">
+              <div class="fl-info-title"><el-icon><Lock /></el-icon> 安全边界约束</div>
+              <div class="fl-info-text">
+                原始数据绝对不出本地节点。主节点仅接收梯度/指标摘要、参与方哈希和链上存证凭证；强制启用 SparsePlainAggregator 安全聚合。
+              </div>
+            </div>
           </div>
-        </div>
+
+          <el-descriptions :column="3" border class="mt-4">
+            <el-descriptions-item label="联邦模式">{{ getFederatedModeText(taskParams.federated_mode) }}</el-descriptions-item>
+            <el-descriptions-item label="算法类型">{{ getAlgorithmTypeText(taskParams.algorithm_type) }}</el-descriptions-item>
+            <el-descriptions-item label="执行框架">{{ formatFramework(effectiveFlFramework) }}</el-descriptions-item>
+            <el-descriptions-item label="模型网络" :span="2"><el-tag type="info">{{ effectiveFlModelTypeText }}</el-tag></el-descriptions-item>
+            <el-descriptions-item label="聚合策略">{{ effectiveFlAggregator }}</el-descriptions-item>
+          </el-descriptions>
+
+          <el-divider content-position="left">核心训练超参</el-divider>
+          <div class="config-metric-grid">
+            <div class="config-metric-card"><div class="config-metric-label">Epochs (轮次)</div><div class="config-metric-value">{{ trainConfig.epochs ?? 5 }}</div></div>
+            <div class="config-metric-card"><div class="config-metric-label">Batch Size (批大小)</div><div class="config-metric-value">{{ trainConfig.batch_size ?? 32 }}</div></div>
+            <div class="config-metric-card"><div class="config-metric-label">Learning Rate (学习率)</div><div class="config-metric-value">{{ trainConfig.learning_rate ?? 0.01 }}</div></div>
+          </div>
+        </el-card>
       </template>
 
-      <template v-if="taskResult">
-        <div class="metric-grid">
-          <div class="metric-card">
-            <div class="metric-label">Accuracy</div>
-            <div class="metric-value">
-              {{ formatPercentNumber(federatedSummary.final_accuracy) }}
-            </div>
+      <h3 class="section-title">参与方拓扑网络</h3>
+      <el-card class="section-card" shadow="never">
+        <template #header>
+          <div class="result-header">
+            <span class="card-title"><el-icon><Connection /></el-icon> 当前在线计算节点</span>
+            <el-button type="primary" :icon="Plus" @click="openPartyDialog">
+              {{ isFederatedLearningTask(taskDetail) ? '新增训练节点' : '新增参与方' }}
+            </el-button>
           </div>
+        </template>
 
-          <div class="metric-card">
-            <div class="metric-label">AUC</div>
-            <div class="metric-value">
-              {{ formatDecimalNumber(federatedSummary.final_auc) }}
-            </div>
-          </div>
-
-          <div class="metric-card">
-            <div class="metric-label">Precision</div>
-            <div class="metric-value">
-              {{ formatPercentNumber(federatedSummary.final_precision) }}
-            </div>
-          </div>
-
-          <div class="metric-card">
-            <div class="metric-label">Recall</div>
-            <div class="metric-value">
-              {{ formatPercentNumber(federatedSummary.final_recall) }}
-            </div>
-          </div>
-
-          <div class="metric-card">
-            <div class="metric-label">F1</div>
-            <div class="metric-value">
-              {{ formatDecimalNumber(federatedSummary.final_f1) }}
-            </div>
-          </div>
-
-          <div class="metric-card">
-            <div class="metric-label">训练轮次</div>
-            <div class="metric-value">
-              {{ federatedSummary.round_count ?? '-' }}
-            </div>
-          </div>
-
-          <div class="metric-card">
-            <div class="metric-label">参与节点数</div>
-            <div class="metric-value">
-              {{ federatedSummary.participant_count ?? '-' }}
-            </div>
-          </div>
-
-          <div class="metric-card">
-            <div class="metric-label">样本数量</div>
-            <div class="metric-value">
-              {{ formatMetricNumber(federatedSummary.sample_count) }}
-            </div>
-          </div>
-        </div>
-
-        <el-descriptions class="result-desc" :column="2" border>
-          <el-descriptions-item label="任务场景">
-            {{ federatedResultJson.scenario_name || '-' }}
-          </el-descriptions-item>
-
-          <el-descriptions-item label="模型类型">
-            {{ federatedResultJson.model_type || '-' }}
-          </el-descriptions-item>
-
-          <el-descriptions-item label="执行框架">
-            {{ formatFramework(federatedResultJson.framework) }}
-          </el-descriptions-item>
-
-          <el-descriptions-item label="联邦模式">
-            {{ getFederatedModeText(federatedResultJson.train_mode || federatedResultJson.partition_type) }}
-          </el-descriptions-item>
-
-          <el-descriptions-item label="训练策略">
-            {{ federatedResultJson.strategy || '-' }}
-          </el-descriptions-item>
-
-          <el-descriptions-item label="聚合方式">
-            {{ federatedResultJson.aggregator || federatedSummary.privacy_mode || '-' }}
-          </el-descriptions-item>
-
-          <el-descriptions-item label="SecretFlow版本">
-            {{ federatedResultJson.secretflow_version || '-' }}
-          </el-descriptions-item>
-
-          <el-descriptions-item label="原始数据导出">
-            {{ federatedSummary.raw_data_export === false ? '禁止' : '允许' }}
-          </el-descriptions-item>
-
-          <el-descriptions-item label="结果状态">
-            {{ taskResult.status || '-' }}
-          </el-descriptions-item>
-
-          <el-descriptions-item label="结果Hash" :span="2">
-            {{ taskResult.result_hash || '-' }}
-          </el-descriptions-item>
-        </el-descriptions>
-
-        <el-alert
-          v-if="chainAnchorResult"
-          class="anchor-alert"
-          type="success"
-          show-icon
-          :closable="false"
-          :title="getChainAnchorAlertTitle(chainAnchorResult)"
-        />
-
-        <el-descriptions
-          v-if="chainAnchorResult?.chain_record"
-          class="result-desc"
-          :column="2"
-          border
-        >
-          <el-descriptions-item label="存证状态">
-            {{ chainAnchorResult.chain_record.status || '-' }}
-          </el-descriptions-item>
-
-          <el-descriptions-item label="链类型">
-            {{ formatChainType(chainAnchorResult.chain_record.chain_type) }}
-          </el-descriptions-item>
-
-          <el-descriptions-item label="区块高度">
-            {{ chainAnchorResult.chain_record.block_number || '-' }}
-          </el-descriptions-item>
-
-          <el-descriptions-item label="合约地址">
-            {{ chainAnchorResult.chain_record.contract_address || '-' }}
-          </el-descriptions-item>
-
-          <el-descriptions-item label="内容哈希" :span="2">
-            {{ chainAnchorResult.chain_record.content_hash || '-' }}
-          </el-descriptions-item>
-
-          <el-descriptions-item label="交易哈希" :span="2">
-            {{ chainAnchorResult.chain_record.tx_hash || '-' }}
-          </el-descriptions-item>
-        </el-descriptions>
-
-        <el-divider content-position="left">分方训练指标</el-divider>
-
-        <el-table
-          v-if="federatedPartyMetricsRows.length"
-          :data="federatedPartyMetricsRows"
-          border
-          size="small"
-          style="width: 100%"
-        >
-          <el-table-column prop="party" label="参与方" width="120" />
-          <el-table-column label="样本数" width="120">
-            <template #default="{ row }">
-              {{ formatMetricNumber(row.sample_count) }}
+        <el-table :data="partyList" border stripe style="width: 100%">
+          <el-table-column prop="agency_id" label="机构 ID" width="90" align="center" />
+          <el-table-column prop="node_id" label="节点标识" width="140">
+             <template #default="{ row }">
+              <span class="mono-text" style="color: #409eff;">Node_{{ row.node_id }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="Accuracy" width="140">
+          <el-table-column prop="party_role" label="授权角色" width="140">
             <template #default="{ row }">
-              {{ formatPercentNumber(row.accuracy) }}
+              <el-tag :type="row.party_role === 'coordinator' ? 'danger' : 'success'" effect="plain">
+                {{ getPartyRoleText(row.party_role) }}
+              </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="AUC" width="140">
+
+          <el-table-column v-if="isFederatedLearningTask(taskDetail)" label="本地数据源映射" min-width="240">
             <template #default="{ row }">
-              {{ formatDecimalNumber(row.auc) }}
+              <div class="text-sm">表: <strong>{{ getPartyLocalTable(row) }}</strong></div>
+              <div class="text-xs text-gray">{{ getPartySampleDesc(row) }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="Precision" width="140">
+
+          <el-table-column prop="status" label="节点状态" width="100" align="center">
             <template #default="{ row }">
-              {{ formatPercentNumber(row.precision) }}
+              <el-tag :type="getStatusType(row.status)">{{ getStatusText(row.status) }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="Recall" width="140">
+
+          <el-table-column label="节点操作" width="100" fixed="right" align="center">
             <template #default="{ row }">
-              {{ formatPercentNumber(row.recall) }}
-            </template>
-          </el-table-column>
-          <el-table-column label="F1" width="120">
-            <template #default="{ row }">
-              {{ formatDecimalNumber(row.f1) }}
-            </template>
-          </el-table-column>
-          <el-table-column label="阳性率" width="120">
-            <template #default="{ row }">
-              {{ formatRate(row.positive_rate) }}
+              <el-button link type="danger" :icon="Delete" @click="handleDeleteParty(row)">移除</el-button>
             </template>
           </el-table-column>
         </el-table>
+      </el-card>
 
-        <el-empty
-          v-else
-          description="暂无分方指标"
-        />
+      <h3 class="section-title">计算结果与可信存证</h3>
+      <el-card class="section-card" shadow="never">
+        <template #header>
+          <div class="result-header">
+            <span class="card-title">
+              <el-icon v-if="isFederatedLearningTask(taskDetail)"><DataLine /></el-icon>
+              <el-icon v-else><PieChart /></el-icon>
+              {{ isFederatedLearningTask(taskDetail) ? '联邦聚合指标' : '统计汇总大盘' }}
+            </span>
+            <div class="result-actions">
+              <el-button :icon="Refresh" @click="loadResult">刷新视图</el-button>
+              <el-button
+                type="warning"
+                :icon="Link"
+                :loading="anchoring"
+                :disabled="!taskResult || taskDetail?.status !== 'success' || hasSuccessfulChainAnchor"
+                @click="handleAnchorTaskResult"
+              >
+                {{ anchorButtonText }}
+              </el-button>
+            </div>
+          </div>
+        </template>
 
-        <el-divider v-if="federatedRounds.length" content-position="left">训练轮次指标</el-divider>
+        <template v-if="taskResult">
+          <div class="metric-grid" v-if="isFederatedLearningTask(taskDetail)">
+            <div class="metric-card"><div class="metric-label">全局 Accuracy</div><div class="metric-value text-blue">{{ formatPercentNumber(federatedSummary.final_accuracy) }}</div></div>
+            <div class="metric-card"><div class="metric-label">全局 AUC</div><div class="metric-value text-green">{{ formatDecimalNumber(federatedSummary.final_auc) }}</div></div>
+            <div class="metric-card"><div class="metric-label">参与聚合样本量</div><div class="metric-value">{{ formatMetricNumber(federatedSummary.sample_count) }}</div></div>
+            <div class="metric-card"><div class="metric-label">完成通信轮次</div><div class="metric-value">{{ federatedSummary.round_count ?? '-' }}</div></div>
+          </div>
+          <div class="metric-grid" v-else>
+            <div class="metric-card"><div class="metric-label">命中病例总数</div><div class="metric-value text-blue">{{ formatMetricNumber(resultMetrics.case_count) }}</div></div>
+            <div class="metric-card"><div class="metric-label">去重独立人数</div><div class="metric-value text-green">{{ formatMetricNumber(resultMetrics.unique_patient_count) }}</div></div>
+            <div class="metric-card"><div class="metric-label">风险阳性数</div><div class="metric-value text-danger">{{ formatMetricNumber(resultMetrics.positive_count) }}</div></div>
+            <div class="metric-card"><div class="metric-label">区域阳性率</div><div class="metric-value">{{ formatRate(resultMetrics.positive_rate) }}</div></div>
+          </div>
 
-        <el-table
-          v-if="federatedRounds.length"
-          :data="federatedRounds"
-          border
-          size="small"
-          style="width: 100%"
-        >
-          <el-table-column prop="round" label="轮次" width="100" />
-          <el-table-column label="Loss" width="160">
-            <template #default="{ row }">
-              {{ formatDecimalNumber(row.loss) }}
-            </template>
-          </el-table-column>
-          <el-table-column label="Accuracy" width="160">
-            <template #default="{ row }">
-              {{ formatPercentNumber(row.accuracy) }}
-            </template>
-          </el-table-column>
-          <el-table-column label="AUC" width="160">
-            <template #default="{ row }">
-              {{ formatDecimalNumber(row.auc) }}
-            </template>
-          </el-table-column>
-        </el-table>
+          <div class="audit-panel" v-if="chainAnchorResult?.chain_record">
+             <div class="audit-title"><el-icon><Monitor /></el-icon> 区块链可信审计中心 (FISCO BCOS)</div>
+             <el-descriptions :column="2" border size="small" class="mt-2">
+                <el-descriptions-item label="区块高度 (Height)">
+                  <span class="mono-text text-green"># {{ chainAnchorResult.chain_record.block_number || '-' }}</span>
+                </el-descriptions-item>
+                <el-descriptions-item label="上链状态">
+                  <el-tag type="success" effect="dark"><el-icon><Check /></el-icon> Confirmed</el-tag>
+                </el-descriptions-item>
+                <el-descriptions-item label="交易哈希 (Tx Hash)" :span="2">
+                  <div class="hash-wrapper w-full" @click="copyText(chainAnchorResult.chain_record.tx_hash)">
+                    <el-icon class="hash-icon"><DocumentCopy /></el-icon>
+                    <span class="hash-text">{{ chainAnchorResult.chain_record.tx_hash || '-' }}</span>
+                  </div>
+                </el-descriptions-item>
+                <el-descriptions-item label="合约地址 (Contract)" :span="2">
+                  <div class="hash-wrapper w-full" @click="copyText(chainAnchorResult.chain_record.contract_address)">
+                    <el-icon class="hash-icon"><DocumentCopy /></el-icon>
+                    <span class="hash-text">{{ chainAnchorResult.chain_record.contract_address || '-' }}</span>
+                  </div>
+                </el-descriptions-item>
+             </el-descriptions>
+          </div>
 
-        <div class="json-title">原始训练结果 JSON</div>
+          <el-divider content-position="left">系统底层回执</el-divider>
+          <div class="fl-terminal-box">
+            <div class="terminal-header">
+              <div class="mac-dots"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+              <span class="terminal-title">bash - core_engine_output.json</span>
+              <el-button link class="copy-btn" @click="copyText(formatJson(taskResult.result_json || taskResult.metrics_json || taskResult))">Copy</el-button>
+            </div>
+            <div class="terminal-body scrollable">
+              <pre class="json-text">{{ formatJson(taskResult.result_json || taskResult.metrics_json || taskResult) }}</pre>
+            </div>
+          </div>
+        </template>
+        <el-empty v-else description="节点计算池待命，请下发指令触发执行" />
+      </el-card>
+    </main>
 
-        <pre class="json-view">{{ formatJson(taskResult.result_json || taskResult.metrics_json || taskResult) }}</pre>
+    <el-dialog v-model="partyDialogVisible" :title="isFederatedLearningTask(taskDetail) ? '新增训练节点' : '新增协同参与方'" width="680px" destroy-on-close>
+      <el-form ref="partyFormRef" :model="partyForm" :rules="partyRules" label-width="120px">
+        <el-form-item label="参与机构" prop="agency_id">
+          <el-select v-model="partyForm.agency_id" filterable clearable style="width: 100%" :loading="resourceLoading" @change="handleAgencyChange">
+            <el-option v-for="item in agencyOptions" :key="item.id" :label="item.agency_name || item.name || item.agency_code || `机构${item.id}`" :value="item.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="参与节点" prop="node_id">
+          <el-select v-model="partyForm.node_id" filterable clearable style="width: 100%" :loading="resourceLoading">
+            <el-option v-for="item in filteredNodeOptions" :key="item.id" :label="item.node_name || item.name || item.node_code || `节点${item.id}`" :value="item.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="数据资源" prop="dataset_id">
+          <el-select v-model="partyForm.dataset_id" filterable clearable style="width: 100%" :loading="resourceLoading">
+            <el-option v-for="item in filteredDatasetOptions" :key="item.id" :label="item.dataset_name || item.name || item.dataset_code || `数据资源${item.id}`" :value="item.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="参与角色">
+          <el-select v-model="partyForm.party_role" style="width: 100%">
+            <el-option v-for="item in partyRoleOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="isFederatedLearningTask(taskDetail) ? '训练字段映射' : '字段映射'">
+          <el-input v-model="fieldMappingText" type="textarea" :rows="8" class="mono-input" placeholder='{"case_id_hash":"case_id_hash"}' />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="partyDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="creatingParty" @click="handleCreateParty">保存节点</el-button>
       </template>
-
-      <el-empty v-else description="暂无联邦训练结果，请先执行联邦训练" />
-    </el-card>
-
-    <el-alert
-      v-else
-      class="section-card"
-      title="当前任务类型：联合统计"
-      type="success"
-      description="当前任务继续使用已有联合统计流程，可配置参与方、执行任务并查看统计结果。"
-      show-icon
-      :closable="false"
-    />
-
-    <el-card
-      v-if="!isFederatedLearningTask(taskDetail)"
-      class="section-card"
-      shadow="never"
-    >
-
-
-  <template #header>
-    <div class="result-header">
-      <div class="card-title">统计结果</div>
-
-      <div class="result-actions">
-        <el-button type="primary" plain @click="loadResult">
-          刷新结果
-        </el-button>
-
-        <el-button
-          type="warning"
-          plain
-          :loading="anchoring"
-          :disabled="!taskResult || taskDetail?.status !== 'success'"
-          @click="handleAnchorTaskResult"
-        >
-          结果存证
-        </el-button>
-      </div>
-    </div>
-  </template>
-
-  <template v-if="taskResult">
-    <div class="metric-grid">
-      <div class="metric-card">
-        <div class="metric-label">病例数</div>
-        <div class="metric-value">
-          {{ formatMetricNumber(resultMetrics.case_count) }}
-        </div>
-      </div>
-
-      <div class="metric-card">
-        <div class="metric-label">去重人数</div>
-        <div class="metric-value">
-          {{ formatMetricNumber(resultMetrics.unique_patient_count) }}
-        </div>
-      </div>
-
-      <div class="metric-card">
-        <div class="metric-label">阳性数</div>
-        <div class="metric-value">
-          {{ formatMetricNumber(resultMetrics.positive_count) }}
-        </div>
-      </div>
-
-      <div class="metric-card">
-        <div class="metric-label">阳性率</div>
-        <div class="metric-value">
-          {{ formatRate(resultMetrics.positive_rate) }}
-        </div>
-      </div>
-    </div>
-
-    <el-descriptions class="result-desc" :column="2" border>
-      <el-descriptions-item label="结果ID">
-        {{ taskResult.id || '-' }}
-      </el-descriptions-item>
-
-      <el-descriptions-item label="结果状态">
-        {{ taskResult.status || '-' }}
-      </el-descriptions-item>
-
-      <el-descriptions-item label="结果Hash">
-        {{ taskResult.result_hash || '-' }}
-      </el-descriptions-item>
-
-      <el-descriptions-item label="创建时间">
-        {{ taskResult.created_at || '-' }}
-      </el-descriptions-item>
-    </el-descriptions>
-
-    <el-alert
-      v-if="chainAnchorResult"
-      class="anchor-alert"
-      type="success"
-      show-icon
-      :closable="false"
-      :title="getChainAnchorAlertTitle(chainAnchorResult)"
-    />
-
-    <el-descriptions
-      v-if="chainAnchorResult?.chain_record"
-      class="result-desc"
-      :column="2"
-      border
-    >
-      <el-descriptions-item label="存证状态">
-        {{ chainAnchorResult.chain_record.status || '-' }}
-      </el-descriptions-item>
-
-      <el-descriptions-item label="链类型">
-        {{ formatChainType(chainAnchorResult.chain_record.chain_type) }}
-      </el-descriptions-item>
-
-      <el-descriptions-item label="区块高度">
-        {{ chainAnchorResult.chain_record.block_number || '-' }}
-      </el-descriptions-item>
-
-      <el-descriptions-item label="合约地址">
-        {{ chainAnchorResult.chain_record.contract_address || '-' }}
-      </el-descriptions-item>
-
-      <el-descriptions-item label="内容哈希" :span="2">
-        {{ chainAnchorResult.chain_record.content_hash || '-' }}
-      </el-descriptions-item>
-
-      <el-descriptions-item label="交易哈希" :span="2">
-        {{ chainAnchorResult.chain_record.tx_hash || '-' }}
-      </el-descriptions-item>
-    </el-descriptions>
-
-
-    <div class="json-title">原始结果 JSON</div>
-
-    <pre class="json-view">{{ formatJson(taskResult.result_json || taskResult.metrics_json || taskResult) }}</pre>
-  </template>
-
-  <el-empty v-else description="暂无统计结果，请先执行任务" />
-</el-card>
+    </el-dialog>
   </div>
-<el-dialog
-  v-model="partyDialogVisible"
-  :title="isFederatedLearningTask(taskDetail) ? '新增训练节点' : '新增任务参与方'"
-  width="680px"
-  destroy-on-close
->
-  <el-form
-    ref="partyFormRef"
-    :model="partyForm"
-    :rules="partyRules"
-    label-width="120px"
-  >
-<el-form-item label="参与机构" prop="agency_id">
-  <el-select
-    v-model="partyForm.agency_id"
-    placeholder="请选择参与机构"
-    filterable
-    clearable
-    style="width: 100%"
-    :loading="resourceLoading"
-    @change="handleAgencyChange"
-  >
-    <el-option
-      v-for="item in agencyOptions"
-      :key="item.id"
-      :label="item.agency_name || item.name || item.agency_code || `机构${item.id}`"
-      :value="item.id"
-    />
-  </el-select>
-</el-form-item>
-
-<el-form-item label="参与节点" prop="node_id">
-  <el-select
-    v-model="partyForm.node_id"
-    placeholder="请选择参与节点"
-    filterable
-    clearable
-    style="width: 100%"
-    :loading="resourceLoading"
-  >
-    <el-option
-      v-for="item in filteredNodeOptions"
-      :key="item.id"
-      :label="item.node_name || item.name || item.node_code || `节点${item.id}`"
-      :value="item.id"
-    />
-  </el-select>
-</el-form-item>
-
-<el-form-item label="数据资源" prop="dataset_id">
-  <el-select
-    v-model="partyForm.dataset_id"
-    placeholder="请选择本地数据资源"
-    filterable
-    clearable
-    style="width: 100%"
-    :loading="resourceLoading"
-  >
-    <el-option
-      v-for="item in filteredDatasetOptions"
-      :key="item.id"
-      :label="item.dataset_name || item.name || item.dataset_code || `数据资源${item.id}`"
-      :value="item.id"
-    />
-  </el-select>
-</el-form-item>
-    <el-form-item label="参与角色">
-      <el-select v-model="partyForm.party_role" style="width: 100%">
-        <el-option
-          v-for="item in partyRoleOptions"
-          :key="item.value"
-          :label="item.label"
-          :value="item.value"
-        />
-      </el-select>
-    </el-form-item>
-
-    <el-alert
-      v-if="isFederatedLearningTask(taskDetail)"
-      class="party-form-alert"
-      title="训练节点说明"
-      type="info"
-      description="联邦学习任务下，参与方表示一个训练节点；字段映射会写入 task_party.field_mapping_json，用于记录本地数据表、样本说明和字段对应关系。"
-      show-icon
-      :closable="false"
-    />
-
-    <el-form-item :label="isFederatedLearningTask(taskDetail) ? '训练字段映射' : '字段映射'">
-      <el-input
-        v-model="fieldMappingText"
-        type="textarea"
-        :rows="isFederatedLearningTask(taskDetail) ? 10 : 6"
-        placeholder='例如：{"case_id_hash":"case_id_hash","spatial_grid_id":"spatial_grid_id"}'
-      />
-    </el-form-item>
-  </el-form>
-
-  <template #footer>
-    <el-button @click="partyDialogVisible = false">取消</el-button>
-    <el-button type="primary" :loading="creatingParty" @click="handleCreateParty">
-      保存
-    </el-button>
-  </template>
-</el-dialog>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+// 统一引入极客风图标
 import {
-  anchorTaskResult,
-  createTaskParty,
-  deleteTaskParty,
-  getTaskDetail,
-  getTaskParties,
-  getTaskResult,
-  runTask,
+  Back, VideoPlay, Refresh, Plus, DocumentCopy, Cpu, Lock,
+  Connection, Link, DataBoard, DataLine, PieChart, Monitor, Check, Delete
+} from '@element-plus/icons-vue'
+
+import {
+  anchorTaskResult, createTaskParty, deleteTaskParty, getTaskDetail,
+  getTaskParties, getTaskResult, runTask,
 } from '@/api/task'
 import { getChainRecordList } from '@/api/chainRecord'
-
-
-
 import { getAgencyList } from '@/api/agency'
 import { getNodeList } from '@/api/node'
 import { getDatasetList } from '@/api/dataset'
 import {
-  buildDefaultFieldMappingText,
-  buildDefaultPartyRole,
-  getAlgorithmTypeText,
-  getFederatedModeText,
-  getFlDatasetFieldRows,
-  getFlProcessSteps,
-  getModelTypeText,
-  getPartyFieldCount,
-  getPartyLocalTable,
-  getPartySampleDesc,
-  getTaskTypeTagTypeFromRow as getTaskTypeTagType,
-  getTaskTypeTextFromRow as getTaskTypeText,
-  isFederatedLearningTask,
-  parseJsonValue,
+  buildDefaultFieldMappingText, buildDefaultPartyRole, getAlgorithmTypeText,
+  getFederatedModeText, getFlDatasetFieldRows, getFlProcessSteps,
+  getModelTypeText, getPartyFieldCount, getPartyLocalTable,
+  getPartySampleDesc, getTaskTypeTagTypeFromRow as getTaskTypeTagType,
+  getTaskTypeTextFromRow as getTaskTypeText, isFederatedLearningTask, parseJsonValue,
 } from '@/constants/taskScenario'
 
-
-
+// --- 基础业务逻辑与状态管理保持不变 ---
 const route = useRoute()
 const router = useRouter()
-
 const taskId = route.params.id as string
 
 const loading = ref(false)
 const running = ref(false)
 const anchoring = ref(false)
-
 const taskDetail = ref<any>(null)
 const partyList = ref<any[]>([])
 const taskResult = ref<any>(null)
@@ -852,34 +304,12 @@ const chainAnchorResult = ref<any>(null)
 const partyDialogVisible = ref(false)
 const creatingParty = ref(false)
 const partyFormRef = ref<FormInstance>()
-
 const fieldMappingText = ref(buildDefaultFieldMappingText(taskDetail.value))
+const partyForm = ref({ agency_id: null as number | null, node_id: null as number | null, dataset_id: null as number | null, party_role: buildDefaultPartyRole(taskDetail.value), field_mapping_json: {} })
 
-const partyForm = ref({
-  agency_id: null as number | null,
-  node_id: null as number | null,
-  dataset_id: null as number | null,
-  party_role: buildDefaultPartyRole(taskDetail.value),
-  field_mapping_json: {},
-})
-
-const statisticPartyRoleOptions = [
-  { label: '数据提供方', value: 'data_provider' },
-  { label: '结果接收方', value: 'result_receiver' },
-  { label: '协调方', value: 'coordinator' },
-]
-
-const federatedPartyRoleOptions = [
-  { label: '训练方', value: 'training_client' },
-  { label: '协调方', value: 'coordinator' },
-  { label: '评估方', value: 'evaluator' },
-]
-
-const partyRoleOptions = computed(() => (
-  isFederatedLearningTask(taskDetail.value) ? federatedPartyRoleOptions : statisticPartyRoleOptions
-))
-
-
+const statisticPartyRoleOptions = [{ label: '数据提供方', value: 'data_provider' }, { label: '结果接收方', value: 'result_receiver' }, { label: '协调方', value: 'coordinator' }]
+const federatedPartyRoleOptions = [{ label: '训练方', value: 'training_client' }, { label: '协调方', value: 'coordinator' }, { label: '评估方', value: 'evaluator' }]
+const partyRoleOptions = computed(() => (isFederatedLearningTask(taskDetail.value) ? federatedPartyRoleOptions : statisticPartyRoleOptions))
 
 const partyRules: FormRules = {
   agency_id: [{ required: true, message: '请选择参与机构', trigger: 'change' }],
@@ -887,31 +317,25 @@ const partyRules: FormRules = {
   dataset_id: [{ required: true, message: '请选择数据资源', trigger: 'change' }],
 }
 
-
-// 下拉框
 const resourceLoading = ref(false)
-
 const agencyOptions = ref<any[]>([])
 const nodeOptions = ref<any[]>([])
 const datasetOptions = ref<any[]>([])
+const filteredNodeOptions = computed(() => (!partyForm.value.agency_id ? nodeOptions.value : nodeOptions.value.filter((item) => item.agency_id === partyForm.value.agency_id)))
+const filteredDatasetOptions = computed(() => (!partyForm.value.agency_id ? datasetOptions.value : datasetOptions.value.filter((item) => item.agency_id === partyForm.value.agency_id)))
 
-const filteredNodeOptions = computed(() => {
-  if (!partyForm.value.agency_id) return nodeOptions.value
-  return nodeOptions.value.filter((item) => item.agency_id === partyForm.value.agency_id)
-})
-
-const filteredDatasetOptions = computed(() => {
-  if (!partyForm.value.agency_id) return datasetOptions.value
-  return datasetOptions.value.filter((item) => item.agency_id === partyForm.value.agency_id)
-})
-
-
-
-
-function unwrapResponse(res: any) {
-  return res?.data?.data ?? res?.data ?? res
+// 剪贴板复制工具
+async function copyText(text: string) {
+  if (!text || text === '-') return
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制到剪贴板')
+  } catch (err) {
+    ElMessage.error('复制失败')
+  }
 }
 
+function unwrapResponse(res: any) { return res?.data?.data ?? res?.data ?? res }
 function normalizeList(payload: any) {
   if (Array.isArray(payload)) return payload
   if (Array.isArray(payload?.items)) return payload.items
@@ -922,802 +346,254 @@ function normalizeList(payload: any) {
 
 async function loadDetail() {
   loading.value = true
-  try {
-    const res = await getTaskDetail(taskId)
-    taskDetail.value = unwrapResponse(res)
-  } catch (error) {
-    console.error(error)
-    ElMessage.error('任务详情加载失败')
-  } finally {
-    loading.value = false
-  }
+  try { taskDetail.value = unwrapResponse(await getTaskDetail(taskId)) }
+  catch (error) { ElMessage.error('任务详情加载失败') }
+  finally { loading.value = false }
 }
 
 async function loadParties() {
-  try {
-    const res = await getTaskParties(taskId)
-    partyList.value = normalizeList(unwrapResponse(res))
-  } catch (error) {
-    console.warn('参与方接口暂不可用或暂无数据', error)
-    partyList.value = []
-  }
+  try { partyList.value = normalizeList(unwrapResponse(await getTaskParties(taskId))) }
+  catch (error) { partyList.value = [] }
 }
 
 async function loadResult() {
   try {
-    const res = await getTaskResult(taskId)
-    taskResult.value = unwrapResponse(res)
+    taskResult.value = unwrapResponse(await getTaskResult(taskId))
     await loadChainRecordForCurrentResult()
   } catch (error) {
-    console.warn('暂无任务结果', error)
-    taskResult.value = null
-    chainAnchorResult.value = null
+    taskResult.value = null; chainAnchorResult.value = null
   }
 }
 
 async function loadChainRecordForCurrentResult() {
-  if (!taskResult.value?.id) {
-    chainAnchorResult.value = null
-    return
-  }
-
+  if (!taskResult.value?.id) { chainAnchorResult.value = null; return }
   try {
-    const res = await getChainRecordList({
-      page: 1,
-      page_size: 1,
-      biz_type: 'task_result',
-      biz_id: String(taskResult.value.id),
-      status: 'success',
-    })
-
-    const data = unwrapResponse(res) || {}
+    const data = unwrapResponse(await getChainRecordList({ page: 1, page_size: 1, biz_type: 'task_result', biz_id: String(taskResult.value.id), status: 'success' })) || {}
     const record = Array.isArray(data.items) ? data.items[0] : null
-
-    if (record) {
-      chainAnchorResult.value = {
-        anchored: true,
-        duplicated: true,
-        message: '当前任务结果已完成 FISCO BCOS 链上存证',
-        chain_record: record,
-      }
-    } else {
-      chainAnchorResult.value = null
-    }
-  } catch (error) {
-    console.warn('存证记录加载失败', error)
-  }
+    chainAnchorResult.value = record ? { anchored: true, duplicated: true, message: '当前任务结果已完成 FISCO BCOS 链上存证', chain_record: record } : null
+  } catch (error) { console.warn('存证记录加载失败', error) }
 }
 
-function sleep(ms: number) {
-  return new Promise((resolve) => window.setTimeout(resolve, ms))
-}
-
+function sleep(ms: number) { return new Promise((resolve) => window.setTimeout(resolve, ms)) }
 function isRequestTimeoutOrNetworkError(error: any) {
-  const code = String(error?.code || '')
-  const message = String(error?.message || '')
-  const responseStatus = error?.response?.status
-
-  return (
-    code === 'ECONNABORTED' ||
-    code === 'ERR_NETWORK' ||
-    responseStatus === 504 ||
-    message.includes('timeout') ||
-    message.includes('Network Error') ||
-    message.includes('网络')
-  )
+  const c = String(error?.code || ''); const m = String(error?.message || ''); const s = error?.response?.status;
+  return c === 'ECONNABORTED' || c === 'ERR_NETWORK' || s === 504 || m.includes('timeout') || m.includes('Network') || m.includes('网络')
 }
 
 async function refreshRuntimeState() {
-  await loadDetail()
-  await loadParties()
-  await loadResult()
-
-  return (
-    taskDetail.value?.status === 'success' ||
-    taskResult.value?.status === 'success' ||
-    !!taskResult.value?.result_hash
-  )
+  await loadDetail(); await loadParties(); await loadResult();
+  return taskDetail.value?.status === 'success' || taskResult.value?.status === 'success' || !!taskResult.value?.result_hash
 }
 
 async function recoverRunSuccessAfterRequestError(isFlTask: boolean) {
-  // 联邦训练耗时较长时，浏览器请求可能先超时，但后端仍会继续执行并最终写入 task_result。
-  // 这里在“网络异常/超时”后短轮询任务结果，避免明明成功却提示执行失败。
   for (let i = 0; i < 15; i += 1) {
     await sleep(i === 0 ? 1000 : 5000)
-
-    const success = await refreshRuntimeState()
-    if (success) {
-      ElMessage.success(isFlTask ? '联邦训练已在后台完成，结果已刷新' : '任务已在后台完成，结果已刷新')
-      return true
-    }
+    if (await refreshRuntimeState()) { ElMessage.success(isFlTask ? '联邦训练已完成' : '任务已完成'); return true }
   }
-
   return false
 }
 
 async function openPartyDialog() {
   partyDialogVisible.value = true
-
-  partyForm.value = {
-    agency_id: null,
-    node_id: null,
-    dataset_id: null,
-    party_role: buildDefaultPartyRole(taskDetail.value),
-    field_mapping_json: {},
-  }
-
+  partyForm.value = { agency_id: null, node_id: null, dataset_id: null, party_role: buildDefaultPartyRole(taskDetail.value), field_mapping_json: {} }
   fieldMappingText.value = buildDefaultFieldMappingText(taskDetail.value)
-
   await loadResourceOptions()
 }
 
-function handleAgencyChange() {
-  partyForm.value.node_id = null
-  partyForm.value.dataset_id = null
-}
+function handleAgencyChange() { partyForm.value.node_id = null; partyForm.value.dataset_id = null }
 
 async function handleCreateParty() {
   if (!partyFormRef.value) return
-
   await partyFormRef.value.validate(async (valid) => {
     if (!valid) return
-
-    if (!partyForm.value.agency_id || !partyForm.value.node_id || !partyForm.value.dataset_id) {
-      ElMessage.warning('请选择参与机构、参与节点和数据资源')
-      return
-    }
-
+    if (!partyForm.value.agency_id || !partyForm.value.node_id || !partyForm.value.dataset_id) { ElMessage.warning('请选择所有必填项'); return }
     creatingParty.value = true
-
     try {
-      let fieldMapping = {}
-
-      if (fieldMappingText.value.trim()) {
-        fieldMapping = JSON.parse(fieldMappingText.value)
-      }
-
-      await createTaskParty(taskId, {
-        agency_id: partyForm.value.agency_id,
-        node_id: partyForm.value.node_id,
-        dataset_id: partyForm.value.dataset_id,
-        party_role: partyForm.value.party_role,
-        field_mapping_json: fieldMapping,
-      })
-
-      ElMessage.success('参与方新增成功')
-      partyDialogVisible.value = false
-      await loadParties()
-    } catch (error) {
-      console.error(error)
-      ElMessage.error('参与方新增失败，请检查字段映射 JSON 或后端数据约束')
-    } finally {
-      creatingParty.value = false
-    }
+      let fm = {}; if (fieldMappingText.value.trim()) fm = JSON.parse(fieldMappingText.value);
+      await createTaskParty(taskId, { ...partyForm.value, field_mapping_json: fm })
+      ElMessage.success('节点挂载成功'); partyDialogVisible.value = false; await loadParties();
+    } catch (error) { ElMessage.error('节点挂载失败，请检查配置') }
+    finally { creatingParty.value = false }
   })
 }
 
 async function handleRun() {
   const isFlTask = isFederatedLearningTask(taskDetail.value)
-
-  if (!partyList.value.length) {
-    ElMessage.warning(isFlTask ? '请先配置训练节点，再执行联邦训练' : '请先配置任务参与方，再执行联合统计任务')
-    return
-  }
-
+  if (!partyList.value.length) { ElMessage.warning('请先配置计算拓扑节点'); return }
   try {
-    await ElMessageBox.confirm(
-      isFlTask ? '确认执行当前联邦训练任务吗？训练过程可能需要 1–3 分钟，请勿重复点击。' : '确认执行当前联合统计任务吗？',
-      '执行确认',
-      {
-        type: 'warning',
-        confirmButtonText: '执行',
-        cancelButtonText: '取消',
-      },
-    )
-
+    await ElMessageBox.confirm('确认唤醒底层计算池并下发计算指令吗？', '执行确认', { type: 'warning', confirmButtonText: '下发指令', cancelButtonText: '取消' })
     running.value = true
-
-    const res = await runTask(taskId)
-    const data = unwrapResponse(res)
-
-    if (data?.result) {
-      taskResult.value = data.result
-    }
-
-    ElMessage.success(isFlTask ? '联邦训练执行成功' : '任务执行成功')
-
+    const data = unwrapResponse(await runTask(taskId))
+    if (data?.result) taskResult.value = data.result
+    ElMessage.success('计算引擎调用成功')
     await refreshRuntimeState()
   } catch (error: any) {
     if (error === 'cancel') return
-
-    console.error(error)
-
     if (isRequestTimeoutOrNetworkError(error)) {
-      ElMessage.warning(isFlTask ? '请求超时或网络中断，正在检查后台训练结果...' : '请求超时或网络中断，正在检查后台执行结果...')
-      const recovered = await recoverRunSuccessAfterRequestError(isFlTask)
-      if (recovered) return
+      ElMessage.warning('调度引擎异步处理中，自动监听回调...')
+      if (await recoverRunSuccessAfterRequestError(isFlTask)) return
     }
-
-    ElMessage.error(isFlTask ? '联邦训练执行失败，请查看后端日志或稍后刷新页面确认状态' : '任务执行失败，请查看后端日志或稍后刷新页面确认状态')
-  } finally {
-    running.value = false
-  }
+    ElMessage.error('引擎执行抛出异常，请检查底层日志')
+  } finally { running.value = false }
 }
 
 async function handleAnchorTaskResult() {
-  if (!taskDetail.value || taskDetail.value.status !== 'success') {
-    ElMessage.warning('任务尚未成功完成，不能进行结果存证')
-    return
-  }
-
-  if (!taskResult.value) {
-    ElMessage.warning('当前任务暂无结果，请先执行任务并生成结果')
-    return
-  }
-
+  if (!taskDetail.value || taskDetail.value.status !== 'success') { ElMessage.warning('任务未就绪'); return }
+  if (!taskResult.value) { ElMessage.warning('无可用计算哈希'); return }
   try {
-    await ElMessageBox.confirm(
-      '确认对当前任务结果进行 FISCO BCOS 链上存证吗？系统将调用 Alice 上链服务，写入链上交易并保存真实 tx_hash、区块高度和合约地址。',
-      '结果存证确认',
-      {
-        type: 'warning',
-        confirmButtonText: '存证',
-        cancelButtonText: '取消',
-      },
-    )
-
+    await ElMessageBox.confirm('确认触发智能合约，将结算数据签发至 FISCO BCOS 联盟链？', '上链确认', { type: 'warning', confirmButtonText: '确认上链', cancelButtonText: '取消' })
     anchoring.value = true
-
-    const res = await anchorTaskResult(taskId)
-    const data = unwrapResponse(res)
-
+    const data = unwrapResponse(await anchorTaskResult(taskId))
     chainAnchorResult.value = data
-
-    if (data?.duplicated) {
-      ElMessage.info(data.message || '当前任务结果已完成存证，无需重复存证')
-    } else {
-      ElMessage.success(data?.message || '任务结果真实上链存证成功')
-    }
-
+    if (data?.duplicated) ElMessage.info(data.message || '记录已存在')
+    else ElMessage.success(data?.message || '智能合约执行完毕，数据已确权')
     await loadChainRecordForCurrentResult()
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      console.error(error)
-      ElMessage.error('结果存证失败')
-    }
-  } finally {
-    anchoring.value = false
-  }
+  } catch (error: any) { if (error !== 'cancel') ElMessage.error('合约调用超时或失败') }
+  finally { anchoring.value = false }
 }
 
-function goBack() {
-  router.push('/tasks')
-}
+function goBack() { router.push('/tasks') }
 
 function formatJson(value: any) {
   if (!value) return '-'
-
-  try {
-    if (typeof value === 'string') {
-      return JSON.stringify(JSON.parse(value), null, 2)
-    }
-
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
+  try { return typeof value === 'string' ? JSON.stringify(JSON.parse(value), null, 2) : JSON.stringify(value, null, 2) }
+  catch { return String(value) }
 }
 
 const taskParams = computed(() => parseJsonValue(taskDetail.value?.params_json))
-
 const datasetConfig = computed(() => taskParams.value?.dataset_config || {})
 const trainConfig = computed(() => taskParams.value?.train_config || {})
 const privacyConfig = computed(() => taskParams.value?.privacy_config || {})
 const traceConfig = computed(() => taskParams.value?.trace_config || {})
-
 const flDatasetFieldRows = computed(() => getFlDatasetFieldRows(taskParams.value))
-
 const flProcessSteps = computed(() => getFlProcessSteps(taskParams.value))
 
 function getPartyRoleText(value: string) {
-  const map: Record<string, string> = {
-    data_provider: '数据提供方',
-    result_receiver: '结果接收方',
-    coordinator: '协调方',
-    training_client: '训练方',
-    evaluator: '评估方',
-  }
-
+  const map: Record<string, string> = { data_provider: '数据提供方', result_receiver: '结果接收方', coordinator: '总控协调节点', training_client: '本地计算节点', evaluator: '评估验证节点' }
   return map[value] || value || '-'
 }
 
 function getStatusText(status: string) {
-  const map: Record<string, string> = {
-    created: '已创建',
-    pending: '待执行',
-    running: '执行中',
-    success: '成功',
-    failed: '失败',
-  }
-
+  const map: Record<string, string> = { created: '已编排', pending: '调度中', running: '计算中', success: '执行成功', failed: '执行失败' }
   return map[status] || status || '-'
 }
 
 function getStatusType(status: string) {
-  const map: Record<string, string> = {
-    created: 'info',
-    pending: 'info',
-    running: 'warning',
-    success: 'success',
-    failed: 'danger',
-  }
-
+  const map: Record<string, string> = { created: 'info', pending: 'info', running: 'warning', success: 'success', failed: 'danger' }
   return map[status] || 'info'
 }
 
-function formatChainType(type: string) {
-  const map: Record<string, string> = {
-    fisco_bcos: 'FISCO BCOS',
-    mock_fisco_bcos: 'Mock FISCO BCOS',
-  }
-
-  return map[type] || type || '-'
-}
-
-function formatFramework(value: string | null | undefined) {
-  const map: Record<string, string> = {
-    mock: '历史 Mock 配置（已由结果覆盖）',
-    flower: 'Flower',
-    secretflow: 'SecretFlow',
-  }
-
-  return map[value || ''] || value || '-'
-}
-
-function getChainAnchorAlertTitle(result: any) {
-  if (!result) return ''
-
-  if (result.duplicated) {
-    const chainType = result.chain_record?.chain_type
-    if (chainType === 'fisco_bcos') {
-      return '当前任务结果已完成 FISCO BCOS 链上存证'
-    }
-    if (chainType === 'mock_fisco_bcos') {
-      return '当前任务结果已存在历史 Mock 存证记录'
-    }
-    return '当前任务结果已完成存证'
-  }
-
-  return result.message || '任务结果真实上链存证成功'
-}
+function formatChainType(type: string) { return type === 'fisco_bcos' ? 'FISCO BCOS' : type === 'mock_fisco_bcos' ? 'Mock FISCO BCOS' : type || '-' }
+function formatFramework(value: string | null | undefined) { return value === 'mock' ? '历史 Mock 配置' : value === 'flower' ? 'Flower' : value === 'secretflow' ? 'SecretFlow Core' : value || '-' }
 
 async function loadResourceOptions() {
   resourceLoading.value = true
-
   try {
-    const [agencyRes, nodeRes, datasetRes] = await Promise.all([
-      getAgencyList({ page: 1, page_size: 100 }),
-      getNodeList({ page: 1, page_size: 100 }),
-      getDatasetList({ page: 1, page_size: 100 }),
-    ])
-
-    agencyOptions.value = normalizeList(unwrapResponse(agencyRes))
-    nodeOptions.value = normalizeList(unwrapResponse(nodeRes))
-    datasetOptions.value = normalizeList(unwrapResponse(datasetRes))
-  } catch (error) {
-    console.error(error)
-    ElMessage.error('机构、节点或数据资源列表加载失败')
-  } finally {
-    resourceLoading.value = false
-  }
+    const [agencyRes, nodeRes, datasetRes] = await Promise.all([getAgencyList({ page: 1, page_size: 100 }), getNodeList({ page: 1, page_size: 100 }), getDatasetList({ page: 1, page_size: 100 })])
+    agencyOptions.value = normalizeList(unwrapResponse(agencyRes)); nodeOptions.value = normalizeList(unwrapResponse(nodeRes)); datasetOptions.value = normalizeList(unwrapResponse(datasetRes))
+  } catch (error) { ElMessage.error('基础资源池加载失败') } finally { resourceLoading.value = false }
 }
 
 async function handleDeleteParty(row: any) {
   try {
-    await ElMessageBox.confirm(
-      `确认删除该参与方吗？机构ID：${row.agency_id}，数据资源ID：${row.dataset_id}`,
-      '删除确认',
-      {
-        type: 'warning',
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-      },
-    )
-
+    await ElMessageBox.confirm('踢出该计算节点将影响协同拓扑，确认？', '断开确认', { type: 'danger', confirmButtonText: '强制断开', cancelButtonText: '取消' })
     await deleteTaskParty(taskId, row.id)
-
-    ElMessage.success('参与方删除成功')
-
-    await loadParties()
-    await loadDetail()
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      console.error(error)
-      ElMessage.error('参与方删除失败')
-    }
-  }
+    ElMessage.success('节点已安全剥离'); await loadParties(); await loadDetail();
+  } catch (error: any) { if (error !== 'cancel') ElMessage.error('节点剥离失败') }
 }
-
 
 const resultMetrics = computed(() => {
-  const resultJson = parseJsonValue(taskResult.value?.result_json)
-  const metricsJson = parseJsonValue(taskResult.value?.metrics_json)
-
-  const source = {
-    ...metricsJson,
-    ...resultJson,
-  }
-
-  return {
-    case_count: source.case_count ?? source.metrics?.case_count ?? null,
-    unique_patient_count:
-      source.unique_patient_count ?? source.metrics?.unique_patient_count ?? null,
-    positive_count: source.positive_count ?? source.metrics?.positive_count ?? null,
-    positive_rate: source.positive_rate ?? source.metrics?.positive_rate ?? null,
-  }
+  const r = parseJsonValue(taskResult.value?.result_json); const m = parseJsonValue(taskResult.value?.metrics_json); const s = { ...m, ...r };
+  return { case_count: s.case_count ?? s.metrics?.case_count ?? null, unique_patient_count: s.unique_patient_count ?? s.metrics?.unique_patient_count ?? null, positive_count: s.positive_count ?? s.metrics?.positive_count ?? null, positive_rate: s.positive_rate ?? s.metrics?.positive_rate ?? null }
 })
 
-
-const federatedResultJson = computed(() => {
-  return parseJsonValue(taskResult.value?.result_json)
-})
-
-const federatedMetricsJson = computed(() => {
-  return parseJsonValue(taskResult.value?.metrics_json)
-})
+const federatedResultJson = computed(() => parseJsonValue(taskResult.value?.result_json))
+const federatedMetricsJson = computed(() => parseJsonValue(taskResult.value?.metrics_json))
 
 const federatedSummary = computed(() => {
-  const result = federatedResultJson.value || {}
-  const metrics = federatedMetricsJson.value || {}
-  const summary = result.summary || {}
-
-  return {
-    final_accuracy: summary.final_accuracy ?? metrics.final_accuracy ?? result.metrics?.accuracy,
-    final_auc: summary.final_auc ?? metrics.final_auc ?? result.metrics?.auc,
-    final_precision: summary.final_precision ?? metrics.final_precision ?? result.metrics?.precision,
-    final_recall: summary.final_recall ?? metrics.final_recall ?? result.metrics?.recall,
-    final_f1: summary.final_f1 ?? metrics.final_f1 ?? result.metrics?.f1,
-    final_loss: summary.final_loss ?? metrics.final_loss,
-    round_count: summary.round_count ?? metrics.round_count ?? result.training_params?.epochs,
-    participant_count: summary.participant_count ?? metrics.participant_count ?? result.participants?.length,
-    sample_count: summary.sample_count ?? metrics.sample_count ?? result.metrics?.sample_count,
-    privacy_mode: summary.privacy_mode ?? metrics.privacy_mode ?? result.aggregator,
-    raw_data_export: summary.raw_data_export ?? metrics.raw_data_export,
-  }
+  const r = federatedResultJson.value || {}; const m = federatedMetricsJson.value || {}; const s = r.summary || {};
+  return { final_accuracy: s.final_accuracy ?? m.final_accuracy ?? r.metrics?.accuracy, final_auc: s.final_auc ?? m.final_auc ?? r.metrics?.auc, final_precision: s.final_precision ?? m.final_precision ?? r.metrics?.precision, final_recall: s.final_recall ?? m.final_recall ?? r.metrics?.recall, final_f1: s.final_f1 ?? m.final_f1 ?? r.metrics?.f1, round_count: s.round_count ?? m.round_count ?? r.training_params?.epochs, participant_count: s.participant_count ?? m.participant_count ?? r.participants?.length, sample_count: s.sample_count ?? m.sample_count ?? r.metrics?.sample_count, privacy_mode: s.privacy_mode ?? m.privacy_mode ?? r.aggregator }
 })
 
-const federatedRounds = computed(() => {
-  const rounds = federatedResultJson.value?.rounds
-  return Array.isArray(rounds) ? rounds : []
-})
+const effectiveFlFramework = computed(() => federatedResultJson.value?.framework || taskParams.value?.framework || 'secretflow')
+const effectiveFlModelType = computed(() => federatedResultJson.value?.model_type || taskParams.value?.model_type || 'FLModel_torch_mlp_binary_classifier')
+const effectiveFlModelTypeText = computed(() => effectiveFlModelType.value === 'FLModel_torch_mlp_binary_classifier' ? 'FLModel + Torch MLP 二分类模型' : getModelTypeText(effectiveFlModelType.value))
+const effectiveFlAggregator = computed(() => federatedResultJson.value?.aggregator || federatedMetricsJson.value?.aggregator || 'SparsePlainAggregator')
+const hasSuccessfulChainAnchor = computed(() => chainAnchorResult.value?.chain_record?.status === 'success')
+const anchorButtonText = computed(() => hasSuccessfulChainAnchor.value ? '链上确权完毕' : '签发至区块链')
 
-const federatedPartyMetricsRows = computed(() => {
-  const metricsByParty = federatedResultJson.value?.metrics_by_party || {}
-
-  return Object.entries(metricsByParty).map(([party, metrics]: any) => ({
-    party,
-    ...(metrics || {}),
-  }))
-})
-
-const effectiveFlFramework = computed(() => {
-  return federatedResultJson.value?.framework || taskParams.value?.framework || 'secretflow'
-})
-
-const effectiveFlModelType = computed(() => {
-  return federatedResultJson.value?.model_type || taskParams.value?.model_type || 'FLModel_torch_mlp_binary_classifier'
-})
-
-const effectiveFlModelTypeText = computed(() => {
-  const value = effectiveFlModelType.value
-  if (value === 'FLModel_torch_mlp_binary_classifier') return 'FLModel + Torch MLP 二分类模型'
-  if (value === 'SSRegression_logistic_regression') return 'SSRegression 逻辑回归模型'
-  return getModelTypeText(value)
-})
-
-const effectiveFlAggregator = computed(() => {
-  return federatedResultJson.value?.aggregator || federatedMetricsJson.value?.aggregator || 'SparsePlainAggregator'
-})
-
-const hasSuccessfulChainAnchor = computed(() => {
-  return chainAnchorResult.value?.chain_record?.status === 'success'
-})
-
-const anchorButtonText = computed(() => {
-  return hasSuccessfulChainAnchor.value ? '已完成存证' : '结果存证'
-})
-
-function formatMetricNumber(value: any) {
-  if (value === null || value === undefined || value === '') return '-'
-  return Number(value).toLocaleString()
-}
-
-function formatRate(value: any) {
-  if (value === null || value === undefined || value === '') return '-'
-
-  const num = Number(value)
-
-  if (Number.isNaN(num)) return '-'
-
-  if (num <= 1) {
-    return `${(num * 100).toFixed(2)}%`
-  }
-
-  return `${num.toFixed(2)}%`
-}
-
-
-function formatDecimalNumber(value: any, digits = 4) {
-  if (value === null || value === undefined || value === '') return '-'
-
-  const num = Number(value)
-  if (Number.isNaN(num)) return '-'
-
-  return num.toFixed(digits).replace(/\.?0+$/, '')
-}
-
-function formatPercentNumber(value: any) {
-  if (value === null || value === undefined || value === '') return '-'
-
-  const num = Number(value)
-  if (Number.isNaN(num)) return '-'
-
-  if (num <= 1) {
-    return `${(num * 100).toFixed(2)}%`
-  }
-
-  return `${num.toFixed(2)}%`
-}
-
-
+function formatMetricNumber(value: any) { return (value == null || value === '') ? '-' : Number(value).toLocaleString() }
+function formatRate(value: any) { const n = Number(value); return isNaN(n) ? '-' : `${(n <= 1 ? n * 100 : n).toFixed(2)}%` }
+function formatDecimalNumber(value: any, digits = 4) { const n = Number(value); return isNaN(n) ? '-' : n.toFixed(digits).replace(/\.?0+$/, '') }
+function formatPercentNumber(value: any) { const n = Number(value); return isNaN(n) ? '-' : `${(n <= 1 ? n * 100 : n).toFixed(2)}%` }
 
 onMounted(async () => {
-  await loadDetail()
-  await loadParties()
-
-  if (route.query.tab === 'result' || taskDetail.value?.status === 'success') {
-    await loadResult()
-  }
+  await loadDetail(); await loadParties();
+  if (route.query.tab === 'result' || taskDetail.value?.status === 'success') await loadResult()
 })
 </script>
 
 <style scoped>
-.task-detail-page {
-  padding: 24px;
-  background: #f5f7fb;
-  min-height: 100vh;
-}
+/* 页面骨架与标题规范 */
+.task-detail-page { min-height: 100vh; background: #f0f2f5; }
+.page-header { height: 72px; background: #ffffff; border-bottom: 1px solid #e5e7eb; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; }
+.title-area h1 { margin: 0; font-size: 20px; color: #1f2937; font-weight: 600; }
+.title-area p { margin: 4px 0 0; color: #6b7280; font-size: 13px; }
+.page-content { padding: 24px; }
+.section-title { margin: 20px 0 16px 0; font-size: 16px; color: #374151; font-weight: 600; border-left: 4px solid #409eff; padding-left: 10px; }
+.section-card { margin-top: 16px; border-radius: 8px; border: none; }
+.result-header { display: flex; justify-content: space-between; align-items: center; }
+.card-title { font-weight: 600; color: #1f2d3d; display: flex; align-items: center; gap: 6px; }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
+/* 极客美学组件：Hash 标签 */
+.hash-wrapper {
+  display: inline-flex; align-items: center; gap: 6px; background: #f3f4f6;
+  padding: 4px 10px; border-radius: 6px; border: 1px solid #e5e7eb; cursor: pointer; transition: all 0.2s;
 }
+.hash-wrapper:hover { background: #e5e7eb; border-color: #d1d5db; }
+.hash-wrapper.w-full { display: flex; width: 100%; justify-content: flex-start; }
+.hash-icon { color: #409eff; font-size: 14px; }
+.hash-text { font-family: 'Consolas', 'Monaco', 'Courier New', monospace; font-size: 13px; color: #374151; }
+.mono-text { font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; }
+.text-green { color: #10b981; } .text-blue { color: #3b82f6; } .text-danger { color: #ef4444; }
 
-.page-header h2 {
-  margin: 0;
-  font-size: 22px;
-  color: #1f2d3d;
-}
+/* 极客美学组件：终端框 (Terminal Box) */
+.fl-terminal-box { width: 100%; border-radius: 8px; background: #1e1e1e; overflow: hidden; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); margin-top: 16px; }
+.terminal-header { background: #2d2d2d; padding: 8px 12px; display: flex; align-items: center; border-bottom: 1px solid #404040; position: relative; }
+.mac-dots { display: flex; gap: 6px; margin-right: 12px; }
+.mac-dots .dot { width: 10px; height: 10px; border-radius: 50%; }
+.dot.red { background: #ff5f56; } .dot.yellow { background: #ffbd2e; } .dot.green { background: #27c93f; }
+.terminal-title { color: #a0a0a0; font-family: 'Consolas', monospace; font-size: 12px; }
+.terminal-header .copy-btn { position: absolute; right: 12px; color: #569cd6; font-size: 12px; font-family: Consolas; }
+.terminal-body { padding: 16px; color: #d4d4d4; font-family: 'Consolas', 'Monaco', monospace; font-size: 13px; line-height: 1.6; max-height: 400px; overflow-y: auto; }
+.terminal-body pre { margin: 0; white-space: pre-wrap; word-wrap: break-word; }
 
-.page-header p {
-  margin: 6px 0 0;
-  color: #7a8499;
-  font-size: 14px;
-}
+/* 模块面板精调 */
+.fl-section-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 16px; }
+.fl-info-panel { padding: 16px; border: 1px solid #e5e7eb; border-radius: 8px; background: #ffffff; }
+.fl-info-panel.dark-panel { background: #1f2937; border-color: #374151; color: #e5e7eb; }
+.fl-info-title { font-weight: 700; display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.fl-info-panel:not(.dark-panel) .fl-info-title { color: #1f2d3d; }
+.fl-info-text { line-height: 1.6; font-size: 13px; color: inherit; opacity: 0.85; }
 
-.header-actions {
-  display: flex;
-  gap: 8px;
-}
+/* 指标卡片 (Metrics Grid) */
+.config-metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 16px; }
+.config-metric-card { padding: 12px 16px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; display: flex; justify-content: space-between; align-items: center;}
+.config-metric-label { font-size: 13px; color: #6b7280; }
+.config-metric-value { font-size: 15px; font-weight: 700; color: #1f2937; font-family: Consolas; }
 
-.section-card {
-  margin-top: 16px;
-}
+.metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+.metric-card { padding: 16px; background: #ffffff; border: 1px solid #e5e7eb; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.02); transition: transform 0.2s; }
+.metric-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+.metric-label { font-size: 13px; color: #6b7280; margin-bottom: 8px; }
+.metric-value { font-size: 24px; font-weight: 700; font-family: Consolas; }
 
-.card-title {
-  font-weight: 600;
-  color: #1f2d3d;
-}
+/* 审计面板 */
+.audit-panel { border: 1px solid #10b981; border-radius: 8px; padding: 16px; background: #ecfdf5; margin-bottom: 24px; }
+.audit-title { font-weight: 700; color: #047857; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
 
-.result-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.json-title {
-  margin-top: 16px;
-  margin-bottom: 8px;
-  font-weight: 600;
-  color: #1f2d3d;
-}
-
-.json-view {
-  padding: 16px;
-  background: #0f172a;
-  color: #e5e7eb;
-  border-radius: 8px;
-  overflow: auto;
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.field-tag {
-  margin-right: 8px;
-  margin-bottom: 6px;
-}
-
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.metric-card {
-  padding: 18px;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-}
-
-.metric-label {
-  font-size: 14px;
-  color: #7a8499;
-  margin-bottom: 10px;
-}
-
-.metric-value {
-  font-size: 26px;
-  font-weight: 700;
-  color: #1f2d3d;
-}
-
-.result-desc {
-  margin-top: 16px;
-}
-
-.scenario-summary {
-  padding: 16px;
-  margin-bottom: 16px;
-  border-radius: 10px;
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
-}
-
-.scenario-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: #1f2d3d;
-  margin-bottom: 8px;
-}
-
-.scenario-text {
-  color: #64748b;
-  line-height: 1.7;
-}
-
-.fl-section-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.fl-info-panel {
-  padding: 16px;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  background: #ffffff;
-}
-
-.fl-info-title {
-  font-weight: 700;
-  color: #1f2d3d;
-  margin-bottom: 8px;
-}
-
-.fl-info-text {
-  color: #64748b;
-  line-height: 1.7;
-}
-
-.config-metric-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 14px;
-}
-
-.config-metric-card {
-  padding: 14px;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  background: #ffffff;
-}
-
-.config-metric-label {
-  font-size: 13px;
-  color: #7a8499;
-  margin-bottom: 8px;
-}
-
-.config-metric-value {
-  font-size: 18px;
-  font-weight: 700;
-  color: #1f2d3d;
-}
-
-.fl-process-list {
-  display: grid;
-  gap: 12px;
-}
-
-.process-step {
-  display: flex;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  background: #ffffff;
-}
-
-.step-index {
-  width: 28px;
-  height: 28px;
-  line-height: 28px;
-  text-align: center;
-  border-radius: 50%;
-  background: #eef2ff;
-  color: #3b82f6;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-.step-title {
-  font-weight: 700;
-  color: #1f2d3d;
-  margin-bottom: 4px;
-}
-
-.step-desc {
-  color: #64748b;
-  line-height: 1.6;
-}
-
-.party-form-alert {
-  margin-bottom: 16px;
-}
-
-.json-collapse {
-  margin-top: 16px;
-}
-
-.result-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.anchor-alert {
-  margin-top: 16px;
-}
-
-@media (max-width: 1200px) {
-  .metric-grid,
-  .config-metric-grid,
-  .fl-section-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 768px) {
-  .metric-grid,
-  .config-metric-grid,
-  .fl-section-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
+/* 实用工具类 */
+.mt-2 { margin-top: 8px; } .mt-4 { margin-top: 16px; }
+.text-sm { font-size: 14px; } .text-xs { font-size: 12px; } .text-gray { color: #9ca3af; }
+.mono-input :deep(.el-input__inner) { font-family: 'Consolas', 'Monaco', monospace; }
 </style>

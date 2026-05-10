@@ -1,285 +1,276 @@
 <template>
   <div class="dashboard-page">
     <header class="topbar">
-      <div>
+      <div class="title-area">
         <h1>首页总览</h1>
         <p>生物安全数据联合统计系统运行态概览</p>
       </div>
-
-      <el-button type="primary" :loading="loading" @click="loadAll">
-        刷新数据
+      <el-button type="primary" :icon="Refresh" :loading="loading" @click="loadAll">
+        刷新态势
       </el-button>
     </header>
 
     <main class="dashboard-content">
-      <!-- 统计卡片 -->
-      <el-row :gutter="16">
-        <el-col
-          v-for="item in cards"
-          :key="item.key"
-          :xs="24"
-          :sm="12"
-          :md="8"
-          :lg="6"
-        >
+      <h3 class="section-title">全网资源基座</h3>
+      <el-row :gutter="16" class="mb-4">
+        <el-col :xs="24" :sm="12" :md="6" v-for="item in resourceCards" :key="item.key">
           <el-card shadow="hover" class="stat-card">
-            <div class="stat-label">{{ item.label }}</div>
-            <div class="stat-value">{{ item.value }}</div>
+            <div class="stat-header">
+              <span class="stat-label">{{ item.label }}</span>
+              <el-icon :size="20" :color="item.color"><component :is="item.icon" /></el-icon>
+            </div>
+            <div class="stat-value">
+              <el-statistic :value="item.value" />
+            </div>
           </el-card>
         </el-col>
       </el-row>
 
-      <!-- 接口联调状态 -->
-      <el-card shadow="never" class="info-card">
-        <template #header>
-          <div class="card-header">
-            <span>接口联调状态</span>
-            <el-button type="primary" size="small" :loading="loading" @click="loadAll">
-              刷新
-            </el-button>
-          </div>
-        </template>
+      <el-row :gutter="16" class="mb-4">
+        <el-col :xs="24" :sm="12" :md="6" v-for="item in taskCards" :key="item.key">
+          <el-card shadow="hover" class="stat-card dark-card">
+            <div class="stat-header">
+              <span class="stat-label">{{ item.label }}</span>
+            </div>
+            <div class="stat-value">
+              <el-statistic :value="item.value" value-style="color: #fff;" />
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
 
-        <el-descriptions :column="1" border>
-          <el-descriptions-item label="后端地址">
-            {{ apiBaseUrl }}
-          </el-descriptions-item>
-          <el-descriptions-item label="登录状态">
-            已登录
-          </el-descriptions-item>
-          <el-descriptions-item label="Dashboard 接口">
-            summary / recent-tasks / recent-results / recent-audit-logs / recent-chain-records
-          </el-descriptions-item>
-        </el-descriptions>
-      </el-card>
+      <h3 class="section-title">联合计算态势</h3>
+      <el-row :gutter="16" class="mb-4">
+        <el-col :span="16">
+          <el-card shadow="never" class="chart-card">
+            <div class="card-header">
+              <span>近 7 天联合任务执行趋势</span>
+            </div>
+            <div ref="trendChartRef" class="chart-container"></div>
+          </el-card>
+        </el-col>
+        <el-col :span="8">
+          <el-card shadow="never" class="chart-card">
+            <div class="card-header">
+              <span>参与机构数据贡献度</span>
+            </div>
+            <div ref="nodeChartRef" class="chart-container"></div>
+          </el-card>
+        </el-col>
+      </el-row>
 
-      <!-- 最近任务 -->
-      <el-card shadow="never" class="table-card">
-        <template #header>
-          <div class="card-header">
-            <span>最近联合统计任务</span>
-            <el-tag type="primary">recent-tasks</el-tag>
-          </div>
-        </template>
-
-        <el-table :data="recentTasks" border stripe>
-          <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="task_code" label="任务编码" min-width="180" />
-          <el-table-column prop="task_name" label="任务名称" min-width="220" />
-          <el-table-column prop="status" label="状态" width="120">
-            <template #default="{ row }">
-              <el-tag :type="getTaskStatusType(row.status)">
-                {{ row.status }}
-              </el-tag>
+      <h3 class="section-title">核心业务与审计追踪</h3>
+      <el-row :gutter="16">
+        <el-col :span="12">
+          <el-card shadow="never" class="table-card">
+            <template #header>
+              <div class="card-header">
+                <span>最近联合统计任务</span>
+                <el-tag type="primary" effect="plain">Task Scheduler</el-tag>
+              </div>
             </template>
-          </el-table-column>
-          <el-table-column prop="created_at" label="创建时间" min-width="180" />
-        </el-table>
-      </el-card>
+            <el-table :data="recentTasks" border stripe height="300">
+              <el-table-column prop="task_name" label="任务名称" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="status" label="状态" width="100">
+                <template #default="{ row }">
+                  <el-tag :type="getTaskStatusType(row.status)" effect="dark" size="small">
+                    {{ row.status.toUpperCase() }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="created_at" label="触发时间" width="160" />
+            </el-table>
+          </el-card>
+        </el-col>
 
-      <!-- 最近结果 -->
-      <el-card shadow="never" class="table-card">
-        <template #header>
-          <div class="card-header">
-            <span>最近统计结果</span>
-            <el-tag type="success">recent-results</el-tag>
-          </div>
-        </template>
-
-        <el-table :data="recentResults" border stripe>
-          <el-table-column prop="id" label="结果ID" width="90" />
-          <el-table-column prop="task_id" label="任务ID" width="90" />
-          <el-table-column prop="status" label="状态" width="120">
-            <template #default="{ row }">
-              <el-tag :type="row.status === 'success' ? 'success' : 'info'">
-                {{ row.status }}
-              </el-tag>
+        <el-col :span="12">
+          <el-card shadow="never" class="table-card">
+            <template #header>
+              <div class="card-header">
+                <span>最新区块链存证审计</span>
+                <el-tag type="success" effect="plain">Blockchain Audit</el-tag>
+              </div>
             </template>
-          </el-table-column>
-          <el-table-column prop="result_hash" label="结果哈希" min-width="260" show-overflow-tooltip />
-          <el-table-column prop="created_at" label="创建时间" min-width="180" />
-        </el-table>
-      </el-card>
-
-      <!-- 最近审计日志 -->
-      <el-card shadow="never" class="table-card">
-        <template #header>
-          <div class="card-header">
-            <span>最近审计日志</span>
-            <el-tag type="warning">recent-audit-logs</el-tag>
-          </div>
-        </template>
-
-        <el-table :data="recentAuditLogs" border stripe>
-          <el-table-column prop="id" label="日志ID" width="90" />
-          <el-table-column prop="operation_type" label="操作类型" min-width="160" />
-          <el-table-column prop="object_type" label="对象类型" width="120" />
-          <el-table-column prop="object_id" label="对象ID" width="120" />
-          <el-table-column prop="operation_desc" label="操作说明" min-width="220" show-overflow-tooltip />
-          <el-table-column prop="created_at" label="创建时间" min-width="180" />
-        </el-table>
-      </el-card>
-
-      <!-- 最近链上存证 -->
-      <el-card shadow="never" class="table-card">
-        <template #header>
-          <div class="card-header">
-            <span>最近链上存证记录</span>
-            <el-tag type="danger">recent-chain-records</el-tag>
-          </div>
-        </template>
-
-        <el-table :data="recentChainRecords" border stripe>
-          <el-table-column prop="id" label="存证ID" width="90" />
-          <el-table-column prop="biz_type" label="业务类型" width="140" />
-          <el-table-column prop="biz_id" label="业务ID" width="120" />
-          <el-table-column prop="chain_type" label="链类型" width="140" />
-          <el-table-column prop="tx_hash" label="交易哈希" min-width="260" show-overflow-tooltip />
-          <el-table-column prop="status" label="状态" width="120">
-            <template #default="{ row }">
-              <el-tag :type="row.status === 'success' ? 'success' : 'info'">
-                {{ row.status }}
-              </el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="created_at" label="创建时间" min-width="180" />
-        </el-table>
-      </el-card>
+            <el-table :data="recentChainRecords" border stripe height="300">
+              <el-table-column prop="biz_type" label="业务动作" width="120" />
+              <el-table-column prop="tx_hash" label="存证哈希 (Tx Hash)" min-width="220">
+                <template #default="{ row }">
+                  <div class="hash-wrapper" @click="copyHash(row.tx_hash)" title="点击复制 Hash">
+                    <el-icon class="hash-icon"><Link /></el-icon>
+                    <span class="hash-text">{{ formatHash(row.tx_hash) }}</span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column prop="created_at" label="上链时间" width="160" />
+            </el-table>
+          </el-card>
+        </el-col>
+      </el-row>
     </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, nextTick, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import * as echarts from 'echarts'
+// 请确保已在全局或此处引入 Element Plus Icons
+import { Refresh, Link, OfficeBuilding, Connection, DataLine, Files } from '@element-plus/icons-vue'
+
 import {
   getDashboardSummaryApi,
   getRecentTasksApi,
-  getRecentResultsApi,
-  getRecentAuditLogsApi,
   getRecentChainRecordsApi,
 } from '@/api/dashboard'
 
+// --- Types ---
+interface SummaryData {
+  agency_count: number
+  node_count: number
+  dataset_count: number
+  stat_template_count: number
+  task_count: number
+  success_task_count: number
+  result_count: number
+  chain_record_count: number
+}
+
+interface TaskItem {
+  id: number
+  task_code: string
+  task_name: string
+  status: string
+  created_at: string
+}
+
+interface ChainRecordItem {
+  id: number
+  biz_type: string
+  biz_id: string
+  chain_type: string
+  tx_hash: string
+  status: string
+  created_at: string
+}
+
+// --- Store & Router ---
 const router = useRouter()
 const authStore = useAuthStore()
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL
 const loading = ref(false)
 
-const summary = ref<any>({
-  agency_count: 0,
-  node_count: 0,
-  dataset_count: 0,
-  stat_template_count: 0,
-  task_count: 0,
-  success_task_count: 0,
-  result_count: 0,
-  audit_log_count: 0,
-  chain_record_count: 0,
+// --- Data Refs ---
+const summary = ref<SummaryData>({
+  agency_count: 0, node_count: 0, dataset_count: 0, stat_template_count: 0,
+  task_count: 0, success_task_count: 0, result_count: 0, chain_record_count: 0
 })
+const recentTasks = ref<TaskItem[]>([])
+const recentChainRecords = ref<ChainRecordItem[]>([])
 
-const recentTasks = ref<any[]>([])
-const recentResults = ref<any[]>([])
-const recentAuditLogs = ref<any[]>([])
-const recentChainRecords = ref<any[]>([])
+// --- Chart Refs ---
+const trendChartRef = ref<HTMLElement | null>(null)
+const nodeChartRef = ref<HTMLElement | null>(null)
+let trendChartInstance: echarts.ECharts | null = null
+let nodeChartInstance: echarts.ECharts | null = null
 
-const username = computed(() => {
-  return authStore.userInfo?.username || authStore.userInfo?.real_name || '当前用户'
-})
-
-const cards = computed(() => [
-  {
-    key: 'agency_count',
-    label: '机构数量',
-    value: summary.value.agency_count,
-  },
-  {
-    key: 'node_count',
-    label: '节点数量',
-    value: summary.value.node_count,
-  },
-  {
-    key: 'dataset_count',
-    label: '数据集数量',
-    value: summary.value.dataset_count,
-  },
-  {
-    key: 'stat_template_count',
-    label: '统计模板数量',
-    value: summary.value.stat_template_count,
-  },
-  {
-    key: 'task_count',
-    label: '任务总数',
-    value: summary.value.task_count,
-  },
-  {
-    key: 'success_task_count',
-    label: '成功任务数',
-    value: summary.value.success_task_count,
-  },
-  {
-    key: 'result_count',
-    label: '统计结果数',
-    value: summary.value.result_count,
-  },
-  {
-    key: 'audit_log_count',
-    label: '审计日志数',
-    value: summary.value.audit_log_count,
-  },
-  {
-    key: 'chain_record_count',
-    label: '存证记录数',
-    value: summary.value.chain_record_count,
-  },
+// --- Computed ---
+const resourceCards = computed(() => [
+  { key: 'agency', label: '协作机构数', value: summary.value.agency_count, icon: OfficeBuilding, color: '#409EFF' },
+  { key: 'node', label: '联邦节点数', value: summary.value.node_count, icon: Connection, color: '#67C23A' },
+  { key: 'dataset', label: '数据资产量', value: summary.value.dataset_count, icon: DataLine, color: '#E6A23C' },
+  { key: 'template', label: '可用算法模版', value: summary.value.stat_template_count, icon: Files, color: '#F56C6C' },
 ])
 
+const taskCards = computed(() => [
+  { key: 'tasks', label: '累计下发任务', value: summary.value.task_count },
+  { key: 'success', label: '成功计算次数', value: summary.value.success_task_count },
+  { key: 'results', label: '产出统计报告', value: summary.value.result_count },
+  { key: 'chains', label: '区块链确权数', value: summary.value.chain_record_count },
+])
+
+// --- Methods ---
 function getTaskStatusType(status: string) {
-  if (status === 'success') return 'success'
-  if (status === 'running') return 'warning'
-  if (status === 'failed') return 'danger'
-  return 'info'
+  const map: Record<string, string> = { success: 'success', running: 'warning', failed: 'danger' }
+  return map[status] || 'info'
 }
 
-async function loadSummary() {
-  const res: any = await getDashboardSummaryApi()
-  summary.value = res.data || {}
+// 格式化 Hash，省略中间字符
+function formatHash(hash: string) {
+  if (!hash || hash.length < 16) return hash
+  return `${hash.slice(0, 8)}......${hash.slice(-8)}`
 }
 
-async function loadRecentTasks() {
-  const res: any = await getRecentTasksApi(5)
-  recentTasks.value = res.data || []
+// 复制 Hash 到剪贴板
+async function copyHash(hash: string) {
+  try {
+    await navigator.clipboard.writeText(hash)
+    ElMessage.success('区块链存证 Hash 已复制到剪贴板')
+  } catch (err) {
+    ElMessage.error('复制失败')
+  }
 }
 
-async function loadRecentResults() {
-  const res: any = await getRecentResultsApi(5)
-  recentResults.value = res.data || []
+// --- ECharts 初始化 ---
+function initCharts() {
+  if (trendChartRef.value) {
+    trendChartInstance = echarts.init(trendChartRef.value)
+    trendChartInstance.setOption({
+      tooltip: { trigger: 'axis' },
+      grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+      xAxis: { type: 'category', boundaryGap: false, data: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'] },
+      yAxis: { type: 'value' },
+      series: [
+        {
+          name: '任务执行量',
+          type: 'line',
+          smooth: true,
+          areaStyle: { opacity: 0.1, color: '#409EFF' },
+          itemStyle: { color: '#409EFF' },
+          data: [12, 19, 15, 26, 22, 34, 40] // 演示数据，可替换为真实 API 数据
+        }
+      ]
+    })
+  }
+
+  if (nodeChartRef.value) {
+    nodeChartInstance = echarts.init(nodeChartRef.value)
+    nodeChartInstance.setOption({
+      tooltip: { trigger: 'item' },
+      legend: { bottom: '0%', left: 'center' },
+      series: [
+        {
+          name: '数据贡献度',
+          type: 'pie',
+          radius: ['40%', '70%'],
+          avoidLabelOverlap: false,
+          itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+          label: { show: false },
+          data: [
+            { value: 1048, name: '市中心医院' },
+            { value: 735, name: '第一人民医院' },
+            { value: 580, name: '妇幼保健院' },
+            { value: 300, name: '社区服务中心' }
+          ] // 演示数据
+        }
+      ]
+    })
+  }
 }
 
-async function loadRecentAuditLogs() {
-  const res: any = await getRecentAuditLogsApi(5)
-  recentAuditLogs.value = res.data || []
-}
-
-async function loadRecentChainRecords() {
-  const res: any = await getRecentChainRecordsApi(5)
-  recentChainRecords.value = res.data || []
-}
-
+// --- API Calls ---
 async function loadAll() {
   loading.value = true
-
   try {
-    await Promise.all([
-      loadSummary(),
-      loadRecentTasks(),
-      loadRecentResults(),
-      loadRecentAuditLogs(),
-      loadRecentChainRecords(),
+    const [sumRes, taskRes, chainRes] = await Promise.all([
+      getDashboardSummaryApi(),
+      getRecentTasksApi(10), // 加载 10 条填满表格
+      getRecentChainRecordsApi(10)
     ])
+    summary.value = (sumRes as any).data || summary.value
+    recentTasks.value = (taskRes as any).data || []
+    recentChainRecords.value = (chainRes as any).data || []
   } catch (error) {
     console.error(error)
     ElMessage.error('首页数据加载失败')
@@ -288,98 +279,142 @@ async function loadAll() {
   }
 }
 
-async function handleLogout() {
-  await authStore.logout()
-  ElMessage.success('已退出登录')
-  router.push('/login')
-}
-
+// --- Lifecycle ---
 onMounted(async () => {
-  try {
-    if (!authStore.userInfo) {
-      await authStore.fetchMe()
-    }
+  await loadAll()
+  nextTick(() => {
+    initCharts()
+    // 监听窗口大小变化自适应图表
+    window.addEventListener('resize', () => {
+      trendChartInstance?.resize()
+      nodeChartInstance?.resize()
+    })
+  })
+})
 
-    await loadAll()
-  } catch (error) {
-    console.error(error)
-  }
+onBeforeUnmount(() => {
+  trendChartInstance?.dispose()
+  nodeChartInstance?.dispose()
+  window.removeEventListener('resize', () => {})
 })
 </script>
 
 <style scoped>
 .dashboard-page {
   min-height: 100vh;
-  background: #f5f7fb;
+  background: #f0f2f5;
 }
 
 .topbar {
-  height: 76px;
+  height: 72px;
   background: #ffffff;
   border-bottom: 1px solid #e5e7eb;
-  padding: 0 28px;
+  padding: 0 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
-.topbar h1 {
+.title-area h1 {
   margin: 0;
-  font-size: 22px;
+  font-size: 20px;
   color: #1f2937;
+  font-weight: 600;
 }
 
-.topbar p {
-  margin: 6px 0 0;
-  color: #8a96a8;
+.title-area p {
+  margin: 4px 0 0;
+  color: #6b7280;
   font-size: 13px;
-}
-
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.user-info {
-  color: #4b5563;
-  font-size: 14px;
 }
 
 .dashboard-content {
   padding: 24px;
 }
 
-.stat-card {
-  margin-bottom: 16px;
-  border-radius: 14px;
+.section-title {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  color: #374151;
+  font-weight: 600;
+  border-left: 4px solid #409eff;
+  padding-left: 10px;
 }
 
+.mb-4 {
+  margin-bottom: 24px;
+}
+
+/* 统计卡片样式 */
+.stat-card {
+  border-radius: 8px;
+  border: none;
+}
+.dark-card {
+  background: linear-gradient(135deg, #1f2937 0%, #374151 100%);
+  color: #ffffff;
+}
+.dark-card .stat-label {
+  color: #9ca3af;
+}
+
+.stat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
 .stat-label {
-  color: #8a96a8;
+  color: #6b7280;
   font-size: 14px;
 }
-
 .stat-value {
-  margin-top: 10px;
-  color: #1f2937;
-  font-size: 30px;
-  font-weight: 700;
+  margin-top: 16px;
 }
 
-.info-card {
-  margin-top: 12px;
-  border-radius: 14px;
+/* 图表容器 */
+.chart-card {
+  border-radius: 8px;
+}
+.chart-container {
+  height: 280px;
+  width: 100%;
 }
 
+/* 表格头部 */
 .table-card {
-  margin-top: 18px;
-  border-radius: 14px;
+  border-radius: 8px;
 }
-
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  font-weight: 600;
+}
+
+/* Hash 极客样式 */
+.hash-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #f3f4f6;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.hash-wrapper:hover {
+  background: #e5e7eb;
+  border-color: #d1d5db;
+}
+.hash-icon {
+  color: #409eff;
+  font-size: 14px;
+}
+.hash-text {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  color: #374151;
+  letter-spacing: 0.5px;
 }
 </style>
