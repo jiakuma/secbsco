@@ -223,7 +223,7 @@ import {
   DocumentCopy, InfoFilled, Warning, Connection
 } from '@element-plus/icons-vue'
 import {
-  createTask, getTaskList, getTaskResult, runTask, type CreateTaskPayload,
+  createTask, getTaskList, type CreateTaskPayload,
 } from '@/api/task'
 import {
   buildTaskParamsJson, isFederatedLearningTask, getTaskScenarioCodeFromRow as getTaskScenarioCode,
@@ -400,29 +400,42 @@ async function handleCreate() {
 function goDetail(taskId: number | string) { router.push(`/tasks/${taskId}`) }
 
 async function handleRun(row: any) {
-  const isFlTask = isFederatedLearningTask(row)
-  if (row.status === 'success') { ElMessage.info('已执行完毕'); return }
-  if (row.status === 'running') { ElMessage.warning('执行中，请等待'); return }
+  if (row.status === 'running') {
+    ElMessage.warning('任务正在执行中，请稍后查看结果')
+    return
+  }
 
   try {
-    await ElMessageBox.confirm(`确认触发协同计算指令「${row.task_name || row.task_code}」吗？`, '调度确认', {
-      type: 'warning', confirmButtonText: row.status === 'failed' ? '重启指令' : '执行', cancelButtonText: '取消',
+    await ElMessageBox.confirm(
+      `确认下发计算指令「${row.task_name || row.task_code}」并进入结果页面吗？`,
+      '调度确认',
+      {
+        type: 'warning',
+        confirmButtonText: '下发并进入结果页',
+        cancelButtonText: '取消',
+      },
+    )
+
+    router.push({
+      name: 'TaskResult',
+      params: { id: row.id },
+      query: { autoRun: '1' },
     })
-    runningTaskId.value = row.id
-    await runTask(row.id)
-    ElMessage.success('计算节点已被唤醒，任务下发成功')
-    await loadTasks()
   } catch (error: any) {
-    if (error !== 'cancel') ElMessage.error('节点无响应或下发失败')
-  } finally { runningTaskId.value = null }
+    if (error !== 'cancel') ElMessage.error('指令下发入口跳转失败')
+  }
 }
 
 async function goResult(row: any) {
-  if (row.status !== 'success') { ElMessage.warning('结果尚未生成'); return }
-  try {
-    await getTaskResult(row.id)
-    router.push(`/tasks/${row.id}?tab=result`)
-  } catch (error) { ElMessage.warning('结果提取失败') }
+  if (row.status !== 'success') {
+    ElMessage.warning('结果尚未生成')
+    return
+  }
+
+  router.push({
+    name: 'TaskResult',
+    params: { id: row.id },
+  })
 }
 
 function getStatusText(status: string) {
@@ -442,7 +455,7 @@ function getRunButtonText(row: any) {
   if (row.status === 'success') return isFlTask ? '已收敛' : '已归档'
   if (row.status === 'running') return '计算中'
   if (row.status === 'failed') return '重启节点'
-  return isFlTask ? '启动联邦' : '触发计算'
+  return isFlTask ? '下发联邦' : '触发计算'
 }
 
 onMounted(() => { loadTasks() })

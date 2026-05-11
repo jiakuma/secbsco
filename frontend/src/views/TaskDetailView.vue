@@ -81,7 +81,7 @@
             <div class="fl-info-panel dark-panel">
               <div class="fl-info-title"><el-icon><Lock /></el-icon> 安全边界约束</div>
               <div class="fl-info-text">
-                原始数据绝对不出本地节点。主节点仅接收梯度/指标摘要、参与方哈希和链上存证凭证；强制启用 SparsePlainAggregator 安全聚合。
+                原始数据不出本地节点。系统仅接收训练指标、参与方摘要、结果哈希和链上存证凭证；当前聚合方式为 SparsePlainAggregator 验证版。
               </div>
             </div>
           </div>
@@ -150,81 +150,19 @@
         </el-table>
       </el-card>
 
-      <h3 class="section-title">计算结果与可信存证</h3>
+      <h3 class="section-title">执行与结果入口</h3>
       <el-card class="section-card" shadow="never">
-        <template #header>
-          <div class="result-header">
-            <span class="card-title">
-              <el-icon v-if="isFederatedLearningTask(taskDetail)"><DataLine /></el-icon>
-              <el-icon v-else><PieChart /></el-icon>
-              {{ isFederatedLearningTask(taskDetail) ? '联邦聚合指标' : '统计汇总大盘' }}
-            </span>
-            <div class="result-actions">
-              <el-button :icon="Refresh" @click="loadResult">刷新视图</el-button>
-              <el-button
-                type="warning"
-                :icon="Link"
-                :loading="anchoring"
-                :disabled="!taskResult || taskDetail?.status !== 'success' || hasSuccessfulChainAnchor"
-                @click="handleAnchorTaskResult"
-              >
-                {{ anchorButtonText }}
-              </el-button>
+        <div class="dispatch-entry">
+          <div>
+            <div class="dispatch-title">当前页面仅展示任务配置与参与方拓扑</div>
+            <div class="dispatch-desc">
+              点击右上角“下发联邦计算指令”后，将进入结果页面；结果页面会先展示联邦训练过程动画，训练结束后再展示训练指标、结果哈希和链上存证信息。
             </div>
           </div>
-        </template>
-
-        <template v-if="taskResult">
-          <div class="metric-grid" v-if="isFederatedLearningTask(taskDetail)">
-            <div class="metric-card"><div class="metric-label">全局 Accuracy</div><div class="metric-value text-blue">{{ formatPercentNumber(federatedSummary.final_accuracy) }}</div></div>
-            <div class="metric-card"><div class="metric-label">全局 AUC</div><div class="metric-value text-green">{{ formatDecimalNumber(federatedSummary.final_auc) }}</div></div>
-            <div class="metric-card"><div class="metric-label">参与聚合样本量</div><div class="metric-value">{{ formatMetricNumber(federatedSummary.sample_count) }}</div></div>
-            <div class="metric-card"><div class="metric-label">完成通信轮次</div><div class="metric-value">{{ federatedSummary.round_count ?? '-' }}</div></div>
-          </div>
-          <div class="metric-grid" v-else>
-            <div class="metric-card"><div class="metric-label">命中病例总数</div><div class="metric-value text-blue">{{ formatMetricNumber(resultMetrics.case_count) }}</div></div>
-            <div class="metric-card"><div class="metric-label">去重独立人数</div><div class="metric-value text-green">{{ formatMetricNumber(resultMetrics.unique_patient_count) }}</div></div>
-            <div class="metric-card"><div class="metric-label">风险阳性数</div><div class="metric-value text-danger">{{ formatMetricNumber(resultMetrics.positive_count) }}</div></div>
-            <div class="metric-card"><div class="metric-label">区域阳性率</div><div class="metric-value">{{ formatRate(resultMetrics.positive_rate) }}</div></div>
-          </div>
-
-          <div class="audit-panel" v-if="chainAnchorResult?.chain_record">
-             <div class="audit-title"><el-icon><Monitor /></el-icon> 区块链可信审计中心 (FISCO BCOS)</div>
-             <el-descriptions :column="2" border size="small" class="mt-2">
-                <el-descriptions-item label="区块高度 (Height)">
-                  <span class="mono-text text-green"># {{ chainAnchorResult.chain_record.block_number || '-' }}</span>
-                </el-descriptions-item>
-                <el-descriptions-item label="上链状态">
-                  <el-tag type="success" effect="dark"><el-icon><Check /></el-icon> Confirmed</el-tag>
-                </el-descriptions-item>
-                <el-descriptions-item label="交易哈希 (Tx Hash)" :span="2">
-                  <div class="hash-wrapper w-full" @click="copyText(chainAnchorResult.chain_record.tx_hash)">
-                    <el-icon class="hash-icon"><DocumentCopy /></el-icon>
-                    <span class="hash-text">{{ chainAnchorResult.chain_record.tx_hash || '-' }}</span>
-                  </div>
-                </el-descriptions-item>
-                <el-descriptions-item label="合约地址 (Contract)" :span="2">
-                  <div class="hash-wrapper w-full" @click="copyText(chainAnchorResult.chain_record.contract_address)">
-                    <el-icon class="hash-icon"><DocumentCopy /></el-icon>
-                    <span class="hash-text">{{ chainAnchorResult.chain_record.contract_address || '-' }}</span>
-                  </div>
-                </el-descriptions-item>
-             </el-descriptions>
-          </div>
-
-          <el-divider content-position="left">系统底层回执</el-divider>
-          <div class="fl-terminal-box">
-            <div class="terminal-header">
-              <div class="mac-dots"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
-              <span class="terminal-title">bash - core_engine_output.json</span>
-              <el-button link class="copy-btn" @click="copyText(formatJson(taskResult.result_json || taskResult.metrics_json || taskResult))">Copy</el-button>
-            </div>
-            <div class="terminal-body scrollable">
-              <pre class="json-text">{{ formatJson(taskResult.result_json || taskResult.metrics_json || taskResult) }}</pre>
-            </div>
-          </div>
-        </template>
-        <el-empty v-else description="节点计算池待命，请下发指令触发执行" />
+          <el-button type="success" :icon="VideoPlay" @click="handleRun">
+            {{ isFederatedLearningTask(taskDetail) ? '下发联邦计算指令' : '下发协同统计指令' }}
+          </el-button>
+        </div>
       </el-card>
     </main>
 
@@ -287,6 +225,8 @@ import {
   getPartySampleDesc, getTaskTypeTagTypeFromRow as getTaskTypeTagType,
   getTaskTypeTextFromRow as getTaskTypeText, isFederatedLearningTask, parseJsonValue,
 } from '@/constants/taskScenario'
+
+import FederatedAnimation from '@/components/FederatedAnimation.vue'
 
 // --- 基础业务逻辑与状态管理保持不变 ---
 const route = useRoute()
@@ -418,23 +358,32 @@ async function handleCreateParty() {
 }
 
 async function handleRun() {
+  if (!taskDetail.value) return
+  if (!partyList.value.length) {
+    ElMessage.warning('请先配置计算拓扑节点')
+    return
+  }
+
   const isFlTask = isFederatedLearningTask(taskDetail.value)
-  if (!partyList.value.length) { ElMessage.warning('请先配置计算拓扑节点'); return }
+  const confirmText = isFlTask
+    ? '确认下发联邦计算指令并进入训练结果页面吗？'
+    : '确认下发协同统计指令并进入结果页面吗？'
+
   try {
-    await ElMessageBox.confirm('确认唤醒底层计算池并下发计算指令吗？', '执行确认', { type: 'warning', confirmButtonText: '下发指令', cancelButtonText: '取消' })
-    running.value = true
-    const data = unwrapResponse(await runTask(taskId))
-    if (data?.result) taskResult.value = data.result
-    ElMessage.success('计算引擎调用成功')
-    await refreshRuntimeState()
+    await ElMessageBox.confirm(confirmText, '下发确认', {
+      type: 'warning',
+      confirmButtonText: '下发并进入结果页',
+      cancelButtonText: '取消',
+    })
+
+    router.push({
+      name: 'TaskResult',
+      params: { id: taskId },
+      query: { autoRun: '1' },
+    })
   } catch (error: any) {
-    if (error === 'cancel') return
-    if (isRequestTimeoutOrNetworkError(error)) {
-      ElMessage.warning('调度引擎异步处理中，自动监听回调...')
-      if (await recoverRunSuccessAfterRequestError(isFlTask)) return
-    }
-    ElMessage.error('引擎执行抛出异常，请检查底层日志')
-  } finally { running.value = false }
+    if (error !== 'cancel') ElMessage.error('指令下发入口跳转失败')
+  }
 }
 
 async function handleAnchorTaskResult() {
@@ -542,6 +491,9 @@ onMounted(async () => {
 .page-content { padding: 24px; }
 .section-title { margin: 20px 0 16px 0; font-size: 16px; color: #374151; font-weight: 600; border-left: 4px solid #409eff; padding-left: 10px; }
 .section-card { margin-top: 16px; border-radius: 8px; border: none; }
+.dispatch-entry { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 8px 4px; }
+.dispatch-title { font-size: 15px; font-weight: 700; color: #1f2937; margin-bottom: 6px; }
+.dispatch-desc { font-size: 13px; color: #64748b; line-height: 1.7; }
 .result-header { display: flex; justify-content: space-between; align-items: center; }
 .card-title { font-weight: 600; color: #1f2d3d; display: flex; align-items: center; gap: 6px; }
 

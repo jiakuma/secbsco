@@ -53,8 +53,6 @@ export function updateTaskStatus(taskId: number | string, status: string) {
 }
 
 export function runTask(taskId: number | string) {
-  // 联邦学习训练是长耗时请求，默认 axios 超时容易出现“网络请求异常”，但后端实际仍在执行。
-  // 这里单独放大 /run 超时时间，避免前端误判失败。
   return request.post(`/api/tasks/${taskId}/run`, {}, { timeout: 20 * 60 * 1000 })
 }
 

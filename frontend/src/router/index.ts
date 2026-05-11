@@ -38,6 +38,14 @@ const router = createRouter({
           },
         },
         {
+          path: 'tasks/:id/result',
+          name: 'TaskResult',
+          component: () => import('@/views/TaskResultView.vue'),
+          meta: {
+            title: '计算结果',
+          },
+        },
+        {
           path: 'tasks/:id',
           name: 'TaskDetail',
           component: () => import('@/views/TaskDetailView.vue'),
