@@ -1,25 +1,40 @@
-from typing import Optional
-
-from pydantic import BaseModel
+"""节点管理 Schema。"""
+from pydantic import BaseModel, Field
 
 
 class NodeCreate(BaseModel):
-    agency_id: int
-    node_code: str
-    node_name: str
-    node_type: Optional[str] = None
-    endpoint: Optional[str] = None
-    status: Optional[str] = "offline"
-    description: Optional[str] = None
+    node_code: str = Field(..., max_length=64, description="节点编码")
+    node_name: str = Field(..., max_length=128, description="节点名称")
+    agency_id: int = Field(..., description="所属机构ID")
+    node_type: str = Field(default="compute_node", max_length=32, description="节点类型")
+    node_role: str | None = Field(default=None, max_length=64, description="节点角色")
+    service_url: str | None = Field(default=None, max_length=255, description="服务URL")
+    endpoint: str | None = Field(default=None, max_length=255, description="节点访问地址")
+    internal_ip: str | None = Field(default=None, max_length=64, description="内网IP")
+    public_ip: str | None = Field(default=None, max_length=64, description="公网IP")
+    health_check_url: str | None = Field(default=None, max_length=255, description="健康检查URL")
+    ray_address: str | None = Field(default=None, max_length=128, description="Ray地址")
+    anchor_service_url: str | None = Field(default=None, max_length=255, description="存证服务URL")
+    contract_address: str | None = Field(default=None, max_length=128, description="合约地址")
+    status: str = Field(default="active", max_length=32, description="节点状态")
+    description: str | None = Field(default=None, description="描述")
 
 
 class NodeUpdate(BaseModel):
-    agency_id: Optional[int] = None
-    node_name: Optional[str] = None
-    node_type: Optional[str] = None
-    endpoint: Optional[str] = None
-    description: Optional[str] = None
+    node_name: str | None = Field(default=None, max_length=128, description="节点名称")
+    agency_id: int | None = Field(default=None, description="所属机构ID")
+    node_type: str | None = Field(default=None, max_length=32, description="节点类型")
+    node_role: str | None = Field(default=None, max_length=64, description="节点角色")
+    service_url: str | None = Field(default=None, max_length=255, description="服务URL")
+    endpoint: str | None = Field(default=None, max_length=255, description="节点访问地址")
+    internal_ip: str | None = Field(default=None, max_length=64, description="内网IP")
+    public_ip: str | None = Field(default=None, max_length=64, description="公网IP")
+    health_check_url: str | None = Field(default=None, max_length=255, description="健康检查URL")
+    ray_address: str | None = Field(default=None, max_length=128, description="Ray地址")
+    anchor_service_url: str | None = Field(default=None, max_length=255, description="存证服务URL")
+    contract_address: str | None = Field(default=None, max_length=128, description="合约地址")
+    description: str | None = Field(default=None, description="描述")
 
 
 class NodeStatusUpdate(BaseModel):
-    status: str
+    status: str = Field(..., max_length=32, description="节点状态")

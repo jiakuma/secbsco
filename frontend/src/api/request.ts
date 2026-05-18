@@ -16,6 +16,12 @@ request.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`
     }
 
+    // 可选：携带当前群组 ID
+    const currentGroupId = localStorage.getItem('current_group_id')
+    if (currentGroupId) {
+      config.headers['X-Group-Id'] = currentGroupId
+    }
+
     return config
   },
   (error) => {
@@ -41,9 +47,18 @@ request.interceptors.response.use(
       localStorage.removeItem('access_token')
       localStorage.removeItem('token_type')
       localStorage.removeItem('user_info')
+      localStorage.removeItem('user_roles')
+      localStorage.removeItem('user_groups')
+      localStorage.removeItem('user_permissions')
+      localStorage.removeItem('user_menus')
+      localStorage.removeItem('current_group_id')
 
       ElMessage.error('登录已失效，请重新登录')
       router.push('/login')
+    } else if (status === 403) {
+      ElMessage.error('无权限访问该资源')
+    } else if (status === 404) {
+      ElMessage.error('资源不存在或无权访问')
     } else {
       ElMessage.error(error.response?.data?.message || '网络请求异常')
     }

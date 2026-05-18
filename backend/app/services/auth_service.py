@@ -23,7 +23,7 @@ class AuthService:
         if not user:
             return None
 
-        if user.status != "enabled":
+        if user.status not in ("active",):
             return None
 
         if not verify_password(password, user.password_hash):

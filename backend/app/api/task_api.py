@@ -19,6 +19,13 @@ from app.schemas.task_schema import (
     TaskPartyUpdate,
 )
 from app.services import task_service
+from app.services.access_control_service import (
+    get_accessible_group_ids,
+    check_group_access,
+    check_task_run_access,
+    is_platform_admin,
+    write_operate_log,
+)
 from app.services.secretflow_stat_service import SecretFlowStatService
 from app.services.secretflow_fl_service import SecretFlowFLService
 from app.services.task_result_service import TaskResultService
@@ -818,15 +825,25 @@ def list_tasks(
     page_size: int = Query(default=10, ge=1, le=100, description="每页数量"),
     status: str | None = Query(default=None, description="任务状态"),
     keyword: str | None = Query(default=None, description="任务名称关键词"),
+    group_id: int | None = Query(default=None, description="群组ID"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    # 权限过滤
+    accessible_group_ids = get_accessible_group_ids(db, current_user.id)
+
+    # 如果指定了 group_id，校验用户是否可访问
+    if group_id is not None:
+        check_group_access(db, current_user.id, group_id)
+
     data = task_service.list_tasks(
         db=db,
         page=page,
         page_size=page_size,
         status=status,
         keyword=keyword,
+        group_id=group_id,
+        accessible_group_ids=accessible_group_ids,
     )
     return {
         "code": 0,
@@ -910,6 +927,12 @@ def get_task_detail(
         db=db,
         task_id=task_id,
     )
+
+    # 权限校验：检查任务群组
+    task_group_id = data.get("group_id")
+    if task_group_id:
+        check_group_access(db, current_user.id, task_group_id)
+
     return {
         "code": 0,
         "message": "success",
@@ -1300,6 +1323,10 @@ def run_task(
     - federated_learning：调用 Alice SecretFlow 联邦训练服务，生成真实训练结果。
     """
     task = task_service.get_task_or_404(db=db, task_id=task_id)
+
+    # 权限校验：governor 不可执行任务
+    check_task_run_access(db, current_user.id, getattr(task, "group_id", None))
+
     params_json = _safe_json_dict(getattr(task, "params_json", None))
     task_type = params_json.get("task_type") or "statistic"
 
