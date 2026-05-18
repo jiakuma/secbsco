@@ -5,6 +5,8 @@ from app.core.config import settings
 from app.api import (
     health_api,
     auth_api,
+    user_api,
+    group_api,
     agency_api,
     node_api,
     dataset_api,
@@ -38,6 +40,8 @@ app.add_middleware(
 
 app.include_router(health_api.router)
 app.include_router(auth_api.router)
+app.include_router(user_api.router)
+app.include_router(group_api.router)
 app.include_router(agency_api.router)
 app.include_router(node_api.router)
 app.include_router(dataset_api.router)

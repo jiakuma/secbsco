@@ -53,7 +53,7 @@ def get_current_user(
             detail="用户不存在"
         )
 
-    if user.status != "enabled":
+    if user.status != "active":
         raise HTTPException(
             status_code=403,
             detail="用户已被禁用"

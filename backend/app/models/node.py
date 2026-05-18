@@ -13,8 +13,9 @@ class Node(Base):
     node_name: Mapped[str] = mapped_column(String(128), nullable=False, comment="节点名称")
     agency_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("agency.id"), nullable=False, comment="所属机构ID")
 
-    node_type: Mapped[str] = mapped_column(String(32), nullable=False, comment="节点类型: service_node/data_node/compute_node/blockchain_node/gateway_node")
+    node_type: Mapped[str] = mapped_column(String(32), nullable=False, comment="节点类型: integrated_node/service_node/data_node/compute_node/blockchain_node/gateway_node")
     node_role: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="节点角色")
+    node_capabilities: Mapped[list | None] = mapped_column(JSON, nullable=True, comment="节点能力: data/compute/service/chain")
 
     # 网络地址
     service_url: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="服务URL")
@@ -39,6 +40,14 @@ class Node(Base):
     status: Mapped[str] = mapped_column(String(32), default="registered", nullable=False, comment="节点状态: registered/checking/active/offline/disabled/failed")
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="最后心跳时间(兼容旧字段)")
     last_heartbeat_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="最后心跳时间")
+
+    # Agent控制
+    agent_url: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="节点Agent控制服务地址")
+    agent_token: Mapped[str | None] = mapped_column(String(255), nullable=True, comment="节点Agent访问令牌")
+    last_check_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="最近一次检测时间")
+    last_check_result: Mapped[dict | None] = mapped_column(JSON, nullable=True, comment="最近一次检测结果")
+    activation_status: Mapped[str] = mapped_column(String(32), default="not_activated", nullable=False, comment="激活状态: not_activated/activating/activated/activation_failed")
+    activation_message: Mapped[str | None] = mapped_column(Text, nullable=True, comment="激活说明")
 
     # 资源配置
     cpu_total: Mapped[int | None] = mapped_column(Integer, nullable=True, comment="CPU总量(核)")

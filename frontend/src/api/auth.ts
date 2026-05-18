@@ -10,6 +10,7 @@ export interface LoginData {
   access_token?: string
   token?: string
   token_type?: string
+  expires_in?: number
   user?: any
 }
 
@@ -23,6 +24,10 @@ export function loginApi(data: LoginParams) {
 
 export function getMeApi() {
   return request.get('/api/auth/me')
+}
+
+export function getMenusApi() {
+  return request.get('/api/auth/menus')
 }
 
 export function logoutApi() {

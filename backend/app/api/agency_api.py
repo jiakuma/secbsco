@@ -1,188 +1,133 @@
-from typing import Optional
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+"""第5阶段：机构管理 API。"""
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.sys_user import SysUser
-from app.schemas.agency_schema import (
-    AgencyCreate,
-    AgencyUpdate,
-    AgencyStatusUpdate,
-)
-from app.services.agency_service import AgencyService
+from app.schemas.agency_schema import AgencyCreate, AgencyUpdate
+from app.services import agency_service
+from app.utils.response import success, fail
 
 
-router = APIRouter(
-    prefix="/api/agencies",
-    tags=["机构管理"]
-)
+router = APIRouter(prefix="/api/agencies", tags=["机构管理"])
 
 
 @router.get("")
 def list_agencies(
-    keyword: Optional[str] = Query(default=None, description="机构编码或机构名称"),
-    status: Optional[str] = Query(default=None, description="机构状态"),
+    keyword: str | None = Query(default=None, description="机构编码/名称"),
+    agency_level: str | None = Query(default=None, description="机构层级"),
+    agency_type: str | None = Query(default=None, description="机构类型"),
+    status: str | None = Query(default=None, description="机构状态"),
+    parent_agency_id: int | None = Query(default=None, description="上级机构ID"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    """
-    查询机构列表
-    """
-    total, items = AgencyService.list_agencies(
+    data = agency_service.list_agencies(
         db=db,
+        current_user=current_user,
         keyword=keyword,
+        agency_level=agency_level,
+        agency_type=agency_type,
         status=status,
+        parent_agency_id=parent_agency_id,
         page=page,
-        page_size=page_size
+        page_size=page_size,
     )
-
-    return {
-        "code": 0,
-        "message": "success",
-        "data": {
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "items": [
-                AgencyService.build_agency_info(item)
-                for item in items
-            ]
-        }
-    }
+    return success(data)
 
 
-@router.post("")
-def create_agency(
-    agency_req: AgencyCreate,
+@router.get("/tree")
+def get_agency_tree(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    """
-    新增机构
-    """
-    existed = AgencyService.get_agency_by_code(
-        db=db,
-        agency_code=agency_req.agency_code
-    )
-
-    if existed:
-        raise HTTPException(
-            status_code=400,
-            detail="机构编码已存在"
-        )
-
-    agency = AgencyService.create_agency(
-        db=db,
-        agency_req=agency_req
-    )
-
-    return {
-        "code": 0,
-        "message": "success",
-        "data": AgencyService.build_agency_info(agency)
-    }
+    return success(agency_service.get_agency_tree(db, current_user))
 
 
 @router.get("/{agency_id}")
-def get_agency(
+def get_agency_detail(
     agency_id: int,
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    """
-    查询机构详情
-    """
-    agency = AgencyService.get_agency_by_id(
+    return success(agency_service.get_agency_detail(db, agency_id, current_user))
+
+
+@router.post("")
+def create_agency(
+    payload: AgencyCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    data = agency_service.create_agency(
         db=db,
-        agency_id=agency_id
+        payload=payload.model_dump(exclude_unset=True),
+        current_user=current_user,
+        request=request,
     )
-
-    if not agency:
-        raise HTTPException(
-            status_code=404,
-            detail="机构不存在"
-        )
-
-    return {
-        "code": 0,
-        "message": "success",
-        "data": AgencyService.build_agency_info(agency)
-    }
+    return success(data)
 
 
 @router.put("/{agency_id}")
 def update_agency(
     agency_id: int,
-    agency_req: AgencyUpdate,
+    payload: AgencyUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    """
-    编辑机构信息
-    """
-    agency = AgencyService.get_agency_by_id(
+    data = agency_service.update_agency(
         db=db,
-        agency_id=agency_id
+        agency_id=agency_id,
+        payload=payload.model_dump(exclude_unset=True),
+        current_user=current_user,
+        request=request,
     )
-
-    if not agency:
-        raise HTTPException(
-            status_code=404,
-            detail="机构不存在"
-        )
-
-    agency = AgencyService.update_agency(
-        db=db,
-        agency=agency,
-        agency_req=agency_req
-    )
-
-    return {
-        "code": 0,
-        "message": "success",
-        "data": AgencyService.build_agency_info(agency)
-    }
+    return success(data)
 
 
-@router.put("/{agency_id}/status")
-def update_agency_status(
+@router.post("/{agency_id}/enable")
+def enable_agency(
     agency_id: int,
-    status_req: AgencyStatusUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    """
-    启用 / 禁用机构
-    """
-    if status_req.status not in ["enabled", "disabled"]:
-        raise HTTPException(
-            status_code=400,
-            detail="机构状态只能是 enabled 或 disabled"
-        )
+    return success(agency_service.set_agency_status(db, agency_id, "active", current_user, request))
 
-    agency = AgencyService.get_agency_by_id(
-        db=db,
-        agency_id=agency_id
-    )
 
-    if not agency:
-        raise HTTPException(
-            status_code=404,
-            detail="机构不存在"
-        )
+@router.post("/{agency_id}/disable")
+def disable_agency(
+    agency_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    return success(agency_service.set_agency_status(db, agency_id, "disabled", current_user, request))
 
-    agency = AgencyService.update_agency_status(
-        db=db,
-        agency=agency,
-        status=status_req.status
-    )
 
-    return {
-        "code": 0,
-        "message": "success",
-        "data": AgencyService.build_agency_info(agency)
-    }
+@router.post("/{agency_id}/delete")
+def delete_agency_by_post(
+    agency_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    """物理删除机构：兼容前端用 POST 触发删除，避免 DELETE 路由未更新时出现 405。"""
+    return success(agency_service.delete_agency(db, agency_id, current_user, request))
+
+
+@router.delete("/{agency_id}")
+def delete_agency(
+    agency_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    """物理删除机构及其下级机构，同时清理关联的用户、节点、群组关系和存证等数据。"""
+    return success(agency_service.delete_agency(db, agency_id, current_user, request))
+

@@ -65,6 +65,9 @@ def task_to_dict(task: Task) -> dict:
         "params_json": task.params_json,
         "status": task.status,
         "description": task.description,
+        "group_id": getattr(task, "group_id", None),
+        "lead_agency_id": getattr(task, "lead_agency_id", None),
+        "execution_mode": getattr(task, "execution_mode", None),
         "created_at": task.created_at,
         "updated_at": task.updated_at,
     }
@@ -99,8 +102,26 @@ def list_tasks(
     page_size: int = 10,
     status: str | None = None,
     keyword: str | None = None,
+    group_id: int | None = None,
+    accessible_group_ids: list[int] | None = None,
 ) -> dict:
+    """
+    任务列表（支持权限过滤）。
+
+    Args:
+        accessible_group_ids: 可访问的群组 ID 列表，None 代表全局可访问。
+    """
     query = db.query(Task)
+
+    # 权限过滤：仅返回可访问群组下的任务
+    if accessible_group_ids is not None:
+        query = query.filter(
+            (Task.group_id.in_(accessible_group_ids)) | (Task.group_id.is_(None))
+        )
+
+    # 指定群组过滤
+    if group_id is not None:
+        query = query.filter(Task.group_id == group_id)
 
     if status:
         query = query.filter(Task.status == status)

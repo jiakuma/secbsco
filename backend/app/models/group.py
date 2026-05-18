@@ -18,10 +18,24 @@ class GroupInfo(Base):
     lead_agency_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="牵头机构ID")
     description: Mapped[str | None] = mapped_column(Text, nullable=True, comment="描述")
     status: Mapped[str] = mapped_column(String(32), default="draft", nullable=False,
-                                        comment="状态: draft/configuring/pending_active/active/suspended/dissolving/dissolved/archived/disabled")
+                                        comment="状态: draft/pending_approval/active/rejected/dissolving/dissolved/archived/disabled")
     created_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="创建用户ID")
+    creator_agency_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="创建人所属机构ID")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+
+    # 审批相关字段
+    approval_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False,
+                                                     comment="是否需要审批")
+    approval_status: Mapped[str] = mapped_column(String(32), default="none", nullable=False,
+                                                  comment="审批状态: none/pending/approved/rejected")
+    approval_agency_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True,
+                                                             comment="审批机构ID(共同上级)")
+    approved_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="审批通过人ID")
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="审批通过时间")
+    rejected_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="驳回人ID")
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="驳回时间")
+    reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True, comment="驳回原因")
 
     # 生命周期时间戳
     activated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="激活时间")
