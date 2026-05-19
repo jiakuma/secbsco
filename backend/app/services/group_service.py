@@ -117,36 +117,68 @@ def list_groups(
 ) -> dict:
     """
     根据当前用户权限返回可见群组列表（分页）。
+    
+    权限规则：
+    - 平台管理员：查看全部群组
+    - 机构管理员：查看本机构及下辖机构参与的所有群组
+    - 业务用户/治理员：查看自己加入的群组
     """
     from app.services.access_control_service import (
-        get_accessible_group_ids,
         is_platform_admin,
+        is_agency_admin,
         has_role,
+        is_ancestor_agency,
+        is_same_level_agency,
     )
+    from app.models.agency import Agency
+
+    def get_visible_agency_ids(agency_id: int) -> list[int]:
+        """获取机构及其所有下辖机构的ID列表。"""
+        result = [agency_id]
+        
+        def collect_descendants(parent_id: int):
+            children = (
+                db.query(Agency.id)
+                .filter(
+                    Agency.parent_agency_id == parent_id,
+                    Agency.status == "active",
+                )
+                .all()
+            )
+            for child in children:
+                child_id = child[0]
+                if child_id not in result:
+                    result.append(child_id)
+                    collect_descendants(child_id)
+        
+        collect_descendants(agency_id)
+        return result
 
     base_query = db.query(GroupInfo)
 
-    # 权限过滤
-    accessible_ids = get_accessible_group_ids(db, current_user.id)
-    if accessible_ids is not None:
-        agency_admin_groups = set()
-        if has_role(db, current_user.id, "admin", "agency"):
-            agency_member_ids = (
+    if is_platform_admin(db, current_user.id):
+        pass
+    elif is_agency_admin(db, current_user.id):
+        if current_user.agency_id:
+            visible_agency_ids = get_visible_agency_ids(current_user.agency_id)
+            
+            visible_group_ids = (
                 db.query(GroupMember.group_id)
-                .filter(GroupMember.agency_id == current_user.agency_id)
+                .filter(
+                    GroupMember.agency_id.in_(visible_agency_ids),
+                    GroupMember.join_status == "active",
+                )
                 .distinct()
                 .all()
             )
-            agency_lead_ids = (
-                db.query(GroupInfo.id)
-                .filter(GroupInfo.lead_agency_id == current_user.agency_id)
-                .distinct()
-                .all()
-            )
-            agency_admin_groups = {r[0] for r in agency_member_ids} | {r[0] for r in agency_lead_ids}
-
-        all_visible = set(accessible_ids) | agency_admin_groups
-        base_query = base_query.filter(GroupInfo.id.in_(all_visible))
+            visible_group_id_set = {r[0] for r in visible_group_ids}
+            
+            base_query = base_query.filter(GroupInfo.id.in_(visible_group_id_set))
+    else:
+        from app.services.access_control_service import get_accessible_group_ids
+        accessible_ids = get_accessible_group_ids(db, current_user.id)
+        if accessible_ids is not None:
+            base_query = base_query.filter(GroupInfo.id.in_(accessible_ids))
 
     if keyword:
         base_query = base_query.filter(
@@ -171,6 +203,10 @@ def list_groups(
         .all()
     )
 
+    is_platform = is_platform_admin(db, current_user.id)
+    is_agency = is_agency_admin(db, current_user.id)
+    user_agency_id = current_user.agency_id
+
     items = []
     for g in groups:
         member_count = (
@@ -178,16 +214,73 @@ def list_groups(
             .filter(GroupMember.group_id == g.id, GroupMember.join_status == "active")
             .scalar() or 0
         )
-        user_count = (
-            db.query(func.count(SysUserGroup.id))
-            .filter(SysUserGroup.group_id == g.id, SysUserGroup.join_status == "active")
-            .scalar() or 0
+
+        member_agencies = (
+            db.query(GroupMember.agency_id)
+            .filter(GroupMember.group_id == g.id, GroupMember.join_status == "active")
+            .all()
         )
+        member_agency_ids = [m[0] for m in member_agencies if m[0]]
+        
+        if member_agency_ids:
+            user_count = (
+                db.query(func.count(SysUser.id))
+                .filter(
+                    SysUser.agency_id.in_(member_agency_ids),
+                    SysUser.status == "active",
+                )
+                .scalar() or 0
+            )
+        else:
+            user_count = 0
+
         node_count = (
             db.query(func.count(GroupNode.id))
             .filter(GroupNode.group_id == g.id, GroupNode.auth_status == "active")
             .scalar() or 0
         )
+
+        can_delete = False
+        need_delete_approval = False
+        can_approve_delete = False
+
+        if is_platform:
+            can_delete = True
+            need_delete_approval = False
+        elif is_agency:
+            lead_agency_id = g.lead_agency_id
+            
+            members = db.query(GroupMember).filter(
+                GroupMember.group_id == g.id,
+                GroupMember.join_status == "active",
+            ).all()
+            member_agency_ids = [m.agency_id for m in members]
+
+            is_lead_agency = (user_agency_id == lead_agency_id)
+            is_superior_to_lead = is_ancestor_agency(db, user_agency_id, lead_agency_id)
+
+            if is_lead_agency:
+                has_same_level_member = False
+                for aid in member_agency_ids:
+                    if aid != lead_agency_id and is_same_level_agency(db, lead_agency_id, aid):
+                        has_same_level_member = True
+                        break
+
+                if has_same_level_member:
+                    can_delete = True
+                    need_delete_approval = True
+                else:
+                    can_delete = True
+                    need_delete_approval = False
+            elif is_superior_to_lead:
+                can_delete = True
+                need_delete_approval = False
+
+            if g.status == "dissolving" and g.delete_approval_agency_id == user_agency_id:
+                can_approve_delete = True
+
+        if is_platform and g.status == "dissolving":
+            can_approve_delete = True
 
         items.append({
             "id": g.id,
@@ -207,6 +300,13 @@ def list_groups(
             "member_count": member_count,
             "user_count": user_count,
             "node_count": node_count,
+            "task_count": 0,
+            "my_relation": "",
+            "can_manage": False,
+            "can_approve": False,
+            "can_delete": can_delete,
+            "need_delete_approval": need_delete_approval,
+            "can_approve_delete": can_approve_delete,
         })
 
     return {
@@ -240,31 +340,26 @@ def get_group_detail(
         .filter(GroupMember.group_id == group_id, GroupMember.join_status == "active")
         .scalar() or 0
     )
-    user_count = (
-        db.query(func.count(SysUserGroup.id))
-        .filter(SysUserGroup.group_id == group_id, SysUserGroup.join_status == "active")
-        .scalar() or 0
+
+    member_agencies = (
+        db.query(GroupMember.agency_id)
+        .filter(GroupMember.group_id == group_id, GroupMember.join_status == "active")
+        .all()
     )
-    admin_count = (
-        db.query(func.count(SysUserRoleBinding.id))
-        .filter(
-            SysUserRoleBinding.scope_type == "group",
-            SysUserRoleBinding.scope_id == group_id,
-            SysUserRoleBinding.role_code == "admin",
-            SysUserRoleBinding.status == "active",
+    member_agency_ids = [m[0] for m in member_agencies if m[0]]
+
+    if member_agency_ids:
+        user_count = (
+            db.query(func.count(SysUser.id))
+            .filter(
+                SysUser.agency_id.in_(member_agency_ids),
+                SysUser.status == "active",
+            )
+            .scalar() or 0
         )
-        .scalar() or 0
-    )
-    governor_count = (
-        db.query(func.count(SysUserRoleBinding.id))
-        .filter(
-            SysUserRoleBinding.scope_type == "group",
-            SysUserRoleBinding.scope_id == group_id,
-            SysUserRoleBinding.role_code == "governor",
-            SysUserRoleBinding.status == "active",
-        )
-        .scalar() or 0
-    )
+    else:
+        user_count = 0
+
     node_count = (
         db.query(func.count(GroupNode.id))
         .filter(GroupNode.group_id == group_id, GroupNode.auth_status == "active")
@@ -273,16 +368,6 @@ def get_group_detail(
     task_count = (
         db.query(func.count(Task.id))
         .filter(Task.group_id == group_id)
-        .scalar() or 0
-    )
-    result_count = (
-        db.query(func.count(TaskResult.id))
-        .filter(TaskResult.group_id == group_id)
-        .scalar() or 0
-    )
-    chain_record_count = (
-        db.query(func.count(ChainRecord.id))
-        .filter(ChainRecord.group_id == group_id)
         .scalar() or 0
     )
 
@@ -308,12 +393,8 @@ def get_group_detail(
         "summary": {
             "member_count": member_count,
             "user_count": user_count,
-            "admin_count": admin_count,
-            "governor_count": governor_count,
             "node_count": node_count,
             "task_count": task_count,
-            "result_count": result_count,
-            "chain_record_count": chain_record_count,
         },
     }
 
@@ -330,8 +411,8 @@ def create_group_with_creator_admin(
 ) -> dict:
     """
     创建群组，权限判断规则：
-    1. 平台管理员 -> 直接创建，status=draft，无需审批
-    2. 机构管理员（上级创建下级） -> 直接创建，status=draft，无需审批
+    1. 平台管理员 -> 直接创建，status=active，无需审批
+    2. 机构管理员（上级创建下级） -> 直接创建，status=active，无需审批
     3. 机构管理员（同级协作） -> pending_approval，需审批
     4. 群组管理员 -> 403 禁止
     5. 普通用户/治理员 -> 403 禁止
@@ -348,56 +429,61 @@ def create_group_with_creator_admin(
     lead_agency_id = payload.get("lead_agency_id")
     member_agency_ids = payload.get("member_agency_ids", [])
 
-    # ---------- 权限校验 ----------
     now = datetime.now()
-    group_status = "draft"
+    group_status = "active"
     approval_required = False
-    approval_status_str = "none"
+    approval_status_str = "approved"
     approval_agency_id_val = None
 
     if is_platform_admin(db, current_user.id):
-        # 平台管理员：直接创建
-        group_status = "draft"
+        group_status = "active"
         approval_required = False
-        approval_status_str = "none"
+        approval_status_str = "approved"
     elif is_agency_admin(db, current_user.id):
-        # 机构管理员：判断上下级关系
         user_agency_id = current_user.agency_id
 
-        # 牵头机构必须是自己的机构
         if lead_agency_id != user_agency_id:
             raise HTTPException(status_code=403, detail="机构管理员只能以本机构作为牵头机构")
 
-        # 收集所有相关机构ID（牵头 + 成员）
-        all_agency_ids = [lead_agency_id] + [aid for aid in member_agency_ids if aid != lead_agency_id]
+        other_member_ids = [aid for aid in member_agency_ids if aid != lead_agency_id]
 
-        # 判断是否所有目标机构都是本机构的下级
-        all_are_descendants = True
-        all_are_same_level = True
-
-        for aid in all_agency_ids:
-            if aid == user_agency_id:
-                continue
-            if not is_ancestor_agency(db, user_agency_id, aid):
-                all_are_descendants = False
-            if not is_same_level_agency(db, user_agency_id, aid):
-                all_are_same_level = False
-
-        if all_are_descendants:
-            # 上级创建下级群组：直接创建
-            group_status = "draft"
+        if not other_member_ids:
+            group_status = "active"
             approval_required = False
-            approval_status_str = "none"
+            approval_status_str = "approved"
         else:
-            # 同级协作或无法判断：需要审批
-            group_status = "pending_approval"
-            approval_required = True
-            approval_status_str = "pending"
-            # 查找共同上级
-            common_parent = find_common_parent_agency(db, all_agency_ids)
-            approval_agency_id_val = common_parent  # None 则由平台管理员审批
+            has_same_level_member = False
+            for aid in other_member_ids:
+                if is_same_level_agency(db, lead_agency_id, aid):
+                    has_same_level_member = True
+                    break
+
+            if has_same_level_member:
+                group_status = "pending_approval"
+                approval_required = True
+                approval_status_str = "pending"
+                all_agency_ids = [lead_agency_id] + other_member_ids
+                common_parent = find_common_parent_agency(db, all_agency_ids)
+                approval_agency_id_val = common_parent
+            else:
+                all_are_descendants = True
+                for aid in other_member_ids:
+                    if not is_ancestor_agency(db, lead_agency_id, aid):
+                        all_are_descendants = False
+                        break
+
+                if all_are_descendants:
+                    group_status = "active"
+                    approval_required = False
+                    approval_status_str = "approved"
+                else:
+                    group_status = "pending_approval"
+                    approval_required = True
+                    approval_status_str = "pending"
+                    all_agency_ids = [lead_agency_id] + other_member_ids
+                    common_parent = find_common_parent_agency(db, all_agency_ids)
+                    approval_agency_id_val = common_parent
     elif has_role(db, current_user.id, "admin", "group"):
-        # 群组管理员不能创建新群组
         raise HTTPException(
             status_code=403,
             detail="群组管理员不能创建新群组，请使用机构管理员账号发起创建",
@@ -405,18 +491,15 @@ def create_group_with_creator_admin(
     else:
         raise HTTPException(status_code=403, detail="需要管理员权限才能创建群组")
 
-    # ---------- 校验牵头机构存在 ----------
     agency = db.query(Agency).filter(Agency.id == lead_agency_id).first()
     if not agency:
         raise HTTPException(status_code=400, detail="牵头机构不存在")
 
-    # ---------- group_code 唯一性 ----------
     group_code = payload.get("group_code")
     existing = db.query(GroupInfo).filter(GroupInfo.group_code == group_code).first()
     if existing:
         raise HTTPException(status_code=400, detail="群组编码已存在")
 
-    # ---------- 1. 创建 group_info ----------
     group = GroupInfo(
         group_code=group_code,
         group_name=payload.get("group_name"),
@@ -435,7 +518,6 @@ def create_group_with_creator_admin(
     db.add(group)
     db.flush()
 
-    # ---------- 2. 牵头机构自动写入 group_member ----------
     db.add(GroupMember(
         group_id=group.id,
         agency_id=lead_agency_id,
@@ -904,23 +986,6 @@ def remove_group_member(
     if member.is_lead:
         raise HTTPException(status_code=400, detail="不能移除牵头机构")
 
-    # 检查该机构下是否有用户或节点授权
-    has_users = (
-        db.query(SysUserGroup.id)
-        .filter(
-            SysUserGroup.group_id == group_id,
-            SysUserGroup.agency_id == agency_id,
-            SysUserGroup.join_status == "active",
-        )
-        .first()
-    )
-    if has_users:
-        agency_name = _get_agency_name(db, agency_id)
-        raise HTTPException(
-            status_code=400,
-            detail=f"机构「{agency_name}」下已有用户加入该群组，请先移除相关用户再移除机构",
-        )
-
     has_nodes = (
         db.query(GroupNode.id)
         .filter(
@@ -980,49 +1045,48 @@ def list_group_users(
     group_id: int,
     current_user: SysUser,
 ) -> list[dict]:
-    """查询群组用户及其群组角色。"""
+    """
+    查询群组用户（一期：基于成员机构动态计算）。
+    
+    规则：成员机构下所有已启用用户自动归属该群组。
+    """
     from app.services.access_control_service import check_group_access
 
     check_group_access(db, current_user.id, group_id)
 
-    user_groups = (
-        db.query(SysUserGroup)
+    member_agencies = (
+        db.query(GroupMember.agency_id)
         .filter(
-            SysUserGroup.group_id == group_id,
-            SysUserGroup.join_status == "active",
+            GroupMember.group_id == group_id,
+            GroupMember.join_status == "active",
         )
+        .all()
+    )
+    agency_ids = [m[0] for m in member_agencies if m[0]]
+
+    if not agency_ids:
+        return []
+
+    users = (
+        db.query(SysUser)
+        .filter(
+            SysUser.agency_id.in_(agency_ids),
+            SysUser.status == "active",
+        )
+        .order_by(SysUser.id.asc())
         .all()
     )
 
     items = []
-    for ug in user_groups:
-        user = db.query(SysUser).filter(SysUser.id == ug.user_id).first()
-        if not user:
-            continue
-
+    for user in users:
         agency_name = _get_agency_name(db, user.agency_id)
-
-        role_bindings = (
-            db.query(SysUserRoleBinding)
-            .filter(
-                SysUserRoleBinding.user_id == ug.user_id,
-                SysUserRoleBinding.scope_type == "group",
-                SysUserRoleBinding.scope_id == group_id,
-                SysUserRoleBinding.status == "active",
-            )
-            .all()
-        )
-
-        roles = [{"role_code": rb.role_code, "scope_type": rb.scope_type, "scope_id": rb.scope_id} for rb in role_bindings]
-
         items.append({
             "user_id": user.id,
             "username": user.username,
             "real_name": user.real_name,
             "agency_id": user.agency_id,
             "agency_name": agency_name,
-            "join_status": ug.join_status,
-            "roles": roles,
+            "user_status": user.status,
         })
 
     return items
@@ -1408,22 +1472,37 @@ def list_available_group_nodes(
     group_id: int,
     current_user: SysUser,
 ) -> list[dict]:
-    """返回当前群组可授权节点列表（来自成员机构）。"""
-    from app.services.access_control_service import check_group_access
+    """
+    返回当前群组可授权节点列表。
+    
+    一期规则：
+    - 节点只要已注册即可授权，不要求 status=active 或 activation_status=activated
+    - 排除已授权给当前群组的节点
+    - 平台管理员：可看到所有成员机构下的未授权节点
+    - 机构管理员：只能看到本机构及下辖机构范围内、且属于群组成员机构的未授权节点
+    - 业务用户/治理员：不能授权节点
+    """
+    from app.services.access_control_service import (
+        check_group_access,
+        is_platform_admin,
+        is_agency_admin,
+        is_ancestor_agency,
+    )
 
     check_group_access(db, current_user.id, group_id)
 
-    # 获取群组成员机构ID
+    if not is_platform_admin(db, current_user.id) and not is_agency_admin(db, current_user.id):
+        return []
+
     member_agency_ids = (
         db.query(GroupMember.agency_id)
         .filter(GroupMember.group_id == group_id, GroupMember.join_status == "active")
         .all()
     )
-    agency_ids = [r[0] for r in member_agency_ids]
-    if not agency_ids:
+    member_agency_id_list = [r[0] for r in member_agency_ids if r[0]]
+    if not member_agency_id_list:
         return []
 
-    # 获取已授权节点ID
     authorized_node_ids = (
         db.query(GroupNode.node_id)
         .filter(
@@ -1434,15 +1513,40 @@ def list_available_group_nodes(
     )
     auth_ids = {r[0] for r in authorized_node_ids}
 
-    # 查询成员机构的活跃节点
-    nodes = (
-        db.query(Node)
-        .filter(
-            Node.agency_id.in_(agency_ids),
-            Node.status == "active",
-        )
-        .all()
+    query = db.query(Node).filter(
+        Node.agency_id.in_(member_agency_id_list),
+        ~Node.id.in_(auth_ids),
     )
+
+    if is_platform_admin(db, current_user.id):
+        pass
+    elif is_agency_admin(db, current_user.id):
+        user_agency_id = current_user.agency_id
+        if user_agency_id:
+            def get_visible_agency_ids(agency_id: int) -> list[int]:
+                from app.models.agency import Agency
+                result = [agency_id]
+                def collect_descendants(parent_id: int):
+                    children = (
+                        db.query(Agency.id)
+                        .filter(
+                            Agency.parent_agency_id == parent_id,
+                            Agency.status == "active",
+                        )
+                        .all()
+                    )
+                    for child in children:
+                        child_id = child[0]
+                        if child_id not in result:
+                            result.append(child_id)
+                            collect_descendants(child_id)
+                collect_descendants(agency_id)
+                return result
+
+            visible_agency_ids = get_visible_agency_ids(user_agency_id)
+            query = query.filter(Node.agency_id.in_(visible_agency_ids))
+
+    nodes = query.all()
 
     items = []
     for node in nodes:
@@ -1454,7 +1558,6 @@ def list_available_group_nodes(
             "agency_name": _get_agency_name(db, node.agency_id),
             "node_type": node.node_type,
             "node_status": node.status,
-            "authorized": node.id in auth_ids,
         })
 
     return items
@@ -1467,10 +1570,19 @@ def add_group_node(
     current_user: SysUser,
     request: "Request" = None,
 ) -> dict:
-    """授权节点给群组。"""
-    from app.services.access_control_service import check_group_admin_access
-
-    check_group_admin_access(db, current_user.id, group_id)
+    """
+    授权节点给群组。
+    
+    前提条件：
+    1. 群组必须已经创建成功
+    2. 节点所属机构必须是群组成员机构
+    3. 当前操作人必须有该节点所属机构的管理权限
+    4. 节点只要已注册即可授权给群组
+    5. 授权时不要求节点 active
+    6. 授权时不要求 activation_status = activated
+    7. 同一节点不能重复授权给同一群组
+    """
+    from app.services.access_control_service import is_platform_admin, is_agency_admin, is_ancestor_agency
 
     group = db.query(GroupInfo).filter(GroupInfo.id == group_id).first()
     if not group:
@@ -1479,34 +1591,39 @@ def add_group_node(
     node_id = payload.get("node_id")
     remark = payload.get("remark", "")
 
-    # 校验节点存在
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=400, detail="节点不存在")
-    if node.status != "active":
-        raise HTTPException(status_code=400, detail="该节点未启用，不能授权")
 
-    # 节点所属机构必须是群组成员
     is_member = db.query(GroupMember).filter(
         GroupMember.group_id == group_id,
         GroupMember.agency_id == node.agency_id,
         GroupMember.join_status == "active",
     ).first()
     if not is_member:
-        raise HTTPException(status_code=400, detail="非成员机构节点不能授权给当前群组")
+        raise HTTPException(status_code=400, detail="节点所属机构不是群组成员机构，不能授权")
 
-    # 不能重复授权
+    if is_platform_admin(db, current_user.id):
+        pass
+    elif is_agency_admin(db, current_user.id):
+        user_agency_id = current_user.agency_id
+        node_agency_id = node.agency_id
+
+        if user_agency_id != node_agency_id and not is_ancestor_agency(db, user_agency_id, node_agency_id):
+            raise HTTPException(
+                status_code=403,
+                detail="只能授权本机构及下辖机构的节点"
+            )
+    else:
+        raise HTTPException(status_code=403, detail="需要平台管理员或机构管理员权限")
+
     existing = db.query(GroupNode).filter(
         GroupNode.group_id == group_id,
         GroupNode.node_id == node_id,
-        GroupNode.auth_status == "active",
     ).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="该节点已授权给当前群组，不能重复授权")
 
     now = datetime.now()
 
-    # 推断 node_usage_role
     node_usage_role = "group_data"
     if node.node_type in ("compute_node",):
         node_usage_role = "group_compute"
@@ -1515,15 +1632,29 @@ def add_group_node(
     elif node.node_type in ("service_node", "gateway_node"):
         node_usage_role = "group_service"
 
-    db.add(GroupNode(
-        group_id=group_id,
-        agency_id=node.agency_id,
-        node_id=node_id,
-        node_usage_role=node_usage_role,
-        auth_status="active",
-        authorized_by=current_user.id,
-        authorized_at=now,
-    ))
+    if existing:
+        if existing.auth_status == "active":
+            raise HTTPException(status_code=400, detail="该节点已授权给当前群组，不能重复授权")
+        existing.auth_status = "active"
+        existing.authorized_by = current_user.id
+        existing.authorized_at = now
+        existing.revoked_at = None
+        existing.archived_at = None
+        existing.node_usage_role = node_usage_role
+        existing.priority_level = payload.get("priority_level", 1)
+        existing.max_concurrent_tasks = payload.get("max_concurrent_tasks", 1)
+        existing.usage_policy = payload.get("usage_policy")
+        existing.updated_at = now
+    else:
+        db.add(GroupNode(
+            group_id=group_id,
+            agency_id=node.agency_id,
+            node_id=node_id,
+            node_usage_role=node_usage_role,
+            auth_status="active",
+            authorized_by=current_user.id,
+            authorized_at=now,
+        ))
 
     _write_lifecycle_log(
         db,
@@ -1590,6 +1721,7 @@ def remove_group_node(
     now = datetime.now()
     gn.auth_status = "revoked"
     gn.revoked_at = now
+    gn.updated_at = now
 
     node = db.query(Node).filter(Node.id == node_id).first()
 
@@ -1618,3 +1750,287 @@ def remove_group_node(
     db.commit()
 
     return {"node_id": node_id, "revoked": True}
+
+
+# ============================================================
+# 群组删除（物理删除）
+# ============================================================
+
+def _physical_delete_group(db: Session, group_id: int) -> None:
+    """物理删除群组及其关联数据。"""
+    db.query(GroupNode).filter(GroupNode.group_id == group_id).delete(synchronize_session=False)
+    db.query(SysUserGroup).filter(SysUserGroup.group_id == group_id).delete(synchronize_session=False)
+    db.query(GroupMember).filter(GroupMember.group_id == group_id).delete(synchronize_session=False)
+    db.query(GroupLifecycleLog).filter(GroupLifecycleLog.group_id == group_id).delete(synchronize_session=False)
+    db.query(GroupInfo).filter(GroupInfo.id == group_id).delete(synchronize_session=False)
+
+
+def request_delete_group(
+    db: Session,
+    group_id: int,
+    current_user: SysUser,
+    request: "Request" = None,
+) -> dict:
+    """
+    申请删除群组：
+    - 平台管理员：直接物理删除
+    - 上级删除下级群组：直接物理删除
+    - 同级协作群组：需要审批，设置 status=dissolving
+    """
+    from app.services.access_control_service import (
+        is_platform_admin,
+        is_agency_admin,
+        has_role,
+        is_ancestor_agency,
+        is_same_level_agency,
+        find_common_parent_agency,
+    )
+
+    group = db.query(GroupInfo).filter(GroupInfo.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="群组不存在")
+
+    if group.status == "dissolving":
+        raise HTTPException(status_code=400, detail="群组正在删除审批中")
+
+    now = datetime.now()
+
+    if is_platform_admin(db, current_user.id):
+        _write_lifecycle_log(
+            db,
+            group_id=group_id,
+            event_type="group_deleted",
+            operator_user_id=current_user.id,
+            operator_name=current_user.real_name or current_user.username,
+            before_status=group.status,
+            after_status="deleted",
+            reason="平台管理员直接删除",
+            detail={"deleted_by": current_user.id, "direct_delete": True},
+        )
+
+        _physical_delete_group(db, group_id)
+        db.commit()
+
+        return {"id": group_id, "deleted": True, "message": "群组已删除"}
+
+    if is_agency_admin(db, current_user.id):
+        user_agency_id = current_user.agency_id
+        lead_agency_id = group.lead_agency_id
+
+        members = db.query(GroupMember).filter(
+            GroupMember.group_id == group_id,
+            GroupMember.join_status == "active",
+        ).all()
+        member_agency_ids = [m.agency_id for m in members]
+
+        all_agency_ids = [lead_agency_id] + [aid for aid in member_agency_ids if aid != lead_agency_id]
+
+        has_same_level = False
+        for aid in member_agency_ids:
+            if aid != lead_agency_id and is_same_level_agency(db, lead_agency_id, aid):
+                has_same_level = True
+                break
+
+        if not has_same_level:
+            all_are_descendants = True
+            for aid in all_agency_ids:
+                if aid == user_agency_id:
+                    continue
+                if not is_ancestor_agency(db, user_agency_id, aid):
+                    all_are_descendants = False
+                    break
+
+            if all_are_descendants:
+                _write_lifecycle_log(
+                    db,
+                    group_id=group_id,
+                    event_type="group_deleted",
+                    operator_user_id=current_user.id,
+                    operator_name=current_user.real_name or current_user.username,
+                    before_status=group.status,
+                    after_status="deleted",
+                    reason="上级机构管理员直接删除",
+                    detail={"deleted_by": current_user.id, "direct_delete": True},
+                )
+
+                _physical_delete_group(db, group_id)
+                db.commit()
+
+                return {"id": group_id, "deleted": True, "message": "群组已删除"}
+
+        common_parent = find_common_parent_agency(db, all_agency_ids)
+
+        old_status = group.status
+        group.status = "dissolving"
+        group.dissolving_at = now
+        group.delete_approval_status = "pending"
+        group.delete_approval_agency_id = common_parent
+        group.delete_requested_by = current_user.id
+        group.delete_requested_at = now
+        group.updated_at = now
+
+        _write_lifecycle_log(
+            db,
+            group_id=group_id,
+            event_type="delete_requested",
+            operator_user_id=current_user.id,
+            operator_name=current_user.real_name or current_user.username,
+            before_status=old_status,
+            after_status="dissolving",
+            reason="申请删除群组，等待审批",
+            detail={
+                "delete_approval_agency_id": common_parent,
+                "delete_requested_by": current_user.id,
+            },
+        )
+
+        _write_operate_log(
+            db,
+            user_id=current_user.id,
+            username=current_user.username,
+            operation_type="delete_requested",
+            resource_id=group_id,
+            group_id=group_id,
+            request=request,
+        )
+
+        db.commit()
+        db.refresh(group)
+
+        return {
+            "id": group.id,
+            "status": group.status,
+            "delete_approval_status": group.delete_approval_status,
+            "message": "删除申请已提交，等待共同上级审批",
+        }
+
+    raise HTTPException(status_code=403, detail="需要管理员权限才能删除群组")
+
+
+def approve_delete_group(
+    db: Session,
+    group_id: int,
+    current_user: SysUser,
+    request: "Request" = None,
+) -> dict:
+    """审批通过删除群组，执行物理删除。"""
+    from app.services.access_control_service import is_platform_admin, is_agency_admin
+
+    group = db.query(GroupInfo).filter(GroupInfo.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="群组不存在")
+
+    if group.status != "dissolving":
+        raise HTTPException(status_code=400, detail="群组不在删除审批中")
+
+    if group.delete_approval_status != "pending":
+        raise HTTPException(status_code=400, detail="删除审批状态不正确")
+
+    now = datetime.now()
+
+    can_approve = False
+    if is_platform_admin(db, current_user.id):
+        can_approve = True
+    elif is_agency_admin(db, current_user.id):
+        if group.delete_approval_agency_id == current_user.agency_id:
+            can_approve = True
+
+    if not can_approve:
+        raise HTTPException(status_code=403, detail="无权审批该群组删除")
+
+    _write_lifecycle_log(
+        db,
+        group_id=group_id,
+        event_type="delete_approved",
+        operator_user_id=current_user.id,
+        operator_name=current_user.real_name or current_user.username,
+        before_status="dissolving",
+        after_status="deleted",
+        reason="审批通过删除群组",
+        detail={
+            "delete_approved_by": current_user.id,
+            "delete_approval_agency_id": group.delete_approval_agency_id,
+        },
+    )
+
+    _physical_delete_group(db, group_id)
+    db.commit()
+
+    return {"id": group_id, "deleted": True, "message": "删除审批通过，群组已删除"}
+
+
+def reject_delete_group(
+    db: Session,
+    group_id: int,
+    reason: str,
+    current_user: SysUser,
+    request: "Request" = None,
+) -> dict:
+    """驳回删除群组申请，恢复为活跃状态。"""
+    from app.services.access_control_service import is_platform_admin, is_agency_admin
+
+    group = db.query(GroupInfo).filter(GroupInfo.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="群组不存在")
+
+    if group.status != "dissolving":
+        raise HTTPException(status_code=400, detail="群组不在删除审批中")
+
+    if group.delete_approval_status != "pending":
+        raise HTTPException(status_code=400, detail="删除审批状态不正确")
+
+    now = datetime.now()
+
+    can_approve = False
+    if is_platform_admin(db, current_user.id):
+        can_approve = True
+    elif is_agency_admin(db, current_user.id):
+        if group.delete_approval_agency_id == current_user.agency_id:
+            can_approve = True
+
+    if not can_approve:
+        raise HTTPException(status_code=403, detail="无权审批该群组删除")
+
+    old_status = group.status
+    group.status = "active"
+    group.delete_approval_status = "rejected"
+    group.delete_rejected_by = current_user.id
+    group.delete_rejected_at = now
+    group.delete_reject_reason = reason
+    group.dissolving_at = None
+    group.updated_at = now
+
+    _write_lifecycle_log(
+        db,
+        group_id=group_id,
+        event_type="delete_rejected",
+        operator_user_id=current_user.id,
+        operator_name=current_user.real_name or current_user.username,
+        before_status=old_status,
+        after_status="active",
+        reason=f"驳回删除申请：{reason}",
+        detail={
+            "delete_rejected_by": current_user.id,
+            "reason": reason,
+        },
+    )
+
+    _write_operate_log(
+        db,
+        user_id=current_user.id,
+        username=current_user.username,
+        operation_type="delete_rejected",
+        resource_id=group_id,
+        group_id=group_id,
+        request=request,
+    )
+
+    db.commit()
+    db.refresh(group)
+
+    return {
+        "id": group.id,
+        "status": group.status,
+        "delete_approval_status": group.delete_approval_status,
+        "message": "删除申请已驳回",
+    }

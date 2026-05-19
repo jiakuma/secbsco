@@ -280,11 +280,63 @@ def check_admin_access(db: Session, user_id: int) -> None:
 
 def check_group_access(db: Session, user_id: int, group_id: int) -> None:
     """
-    校验用户是否可访问某群组，无权限抛出 404（避免暴露资源存在性）。
+    校验用户是否可查看某群组，无权限抛出 404（避免暴露资源存在性）。
+    
+    权限规则与 list_groups 保持一致：
+    - 平台管理员：可查看全部群组
+    - 机构管理员：可查看本机构及下辖机构参与的所有群组
+    - 业务用户/治理员：可查看自己加入的群组
     """
-    accessible = get_accessible_group_ids(db, user_id)
-    if accessible is not None and group_id not in accessible:
-        raise HTTPException(status_code=404, detail="资源不存在或无权访问")
+    if is_platform_admin(db, user_id):
+        return
+
+    user = db.query(SysUser).filter(SysUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    if is_agency_admin(db, user_id) and user.agency_id:
+        from app.models.group import GroupMember
+        from app.models.agency import Agency
+
+        def get_visible_agency_ids(agency_id: int) -> list[int]:
+            result = [agency_id]
+            def collect_descendants(parent_id: int):
+                children = (
+                    db.query(Agency.id)
+                    .filter(
+                        Agency.parent_agency_id == parent_id,
+                        Agency.status == "active",
+                    )
+                    .all()
+                )
+                for child in children:
+                    child_id = child[0]
+                    if child_id not in result:
+                        result.append(child_id)
+                        collect_descendants(child_id)
+            collect_descendants(agency_id)
+            return result
+
+        visible_agency_ids = get_visible_agency_ids(user.agency_id)
+
+        is_member = (
+            db.query(GroupMember)
+            .filter(
+                GroupMember.group_id == group_id,
+                GroupMember.agency_id.in_(visible_agency_ids),
+                GroupMember.join_status == "active",
+            )
+            .first()
+        )
+
+        if is_member:
+            return
+    else:
+        accessible = get_accessible_group_ids(db, user_id)
+        if accessible is not None and group_id in accessible:
+            return
+
+    raise HTTPException(status_code=404, detail="资源不存在或无权访问")
 
 
 def check_group_admin_access(db: Session, user_id: int, group_id: int) -> None:

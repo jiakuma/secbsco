@@ -458,3 +458,73 @@ def remove_group_node(
         if hasattr(e, "status_code"):
             raise
         return fail(message=str(e), code=500)
+
+
+# ============================================================
+# 群组删除 - 申请删除
+# ============================================================
+
+@router.post("/{group_id}/delete-request")
+def request_delete_group(
+    group_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    """申请删除群组（平台管理员或上级直接删除，同级协作需审批）。"""
+    try:
+        data = group_service.request_delete_group(
+            db, group_id, current_user, request,
+        )
+        return success(data=data)
+    except Exception as e:
+        if hasattr(e, "status_code"):
+            raise
+        return fail(message=str(e), code=500)
+
+
+# ============================================================
+# 群组删除 - 审批通过
+# ============================================================
+
+@router.post("/{group_id}/delete-approve")
+def approve_delete_group(
+    group_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    """审批通过删除群组，执行物理删除。"""
+    try:
+        data = group_service.approve_delete_group(
+            db, group_id, current_user, request,
+        )
+        return success(data=data)
+    except Exception as e:
+        if hasattr(e, "status_code"):
+            raise
+        return fail(message=str(e), code=500)
+
+
+# ============================================================
+# 群组删除 - 审批驳回
+# ============================================================
+
+@router.post("/{group_id}/delete-reject")
+def reject_delete_group(
+    group_id: int,
+    payload: GroupReject,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    """驳回删除群组申请。"""
+    try:
+        data = group_service.reject_delete_group(
+            db, group_id, payload.reason, current_user, request,
+        )
+        return success(data=data)
+    except Exception as e:
+        if hasattr(e, "status_code"):
+            raise
+        return fail(message=str(e), code=500)

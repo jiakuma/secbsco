@@ -47,6 +47,18 @@ class GroupInfo(Base):
     dissolve_reason: Mapped[str | None] = mapped_column(Text, nullable=True, comment="解散原因")
     archive_policy: Mapped[str | None] = mapped_column(String(64), nullable=True, comment="归档策略")
 
+    delete_approval_status: Mapped[str] = mapped_column(String(32), default="none", nullable=False,
+                                                        comment="删除审批状态: none/pending/approved/rejected")
+    delete_approval_agency_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True,
+                                                                   comment="删除审批机构ID")
+    delete_requested_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="删除申请人ID")
+    delete_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="删除申请时间")
+    delete_approved_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="删除审批通过人ID")
+    delete_approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="删除审批通过时间")
+    delete_rejected_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="删除驳回人ID")
+    delete_rejected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="删除驳回时间")
+    delete_reject_reason: Mapped[str | None] = mapped_column(Text, nullable=True, comment="删除驳回原因")
+
     __table_args__ = (
         Index("idx_group_code", "group_code"),
         Index("idx_group_status", "status"),

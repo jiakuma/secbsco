@@ -1,31 +1,33 @@
 <template>
   <div class="group-detail-page" v-loading="pageLoading">
-    <!-- 返回按钮 -->
-    <div class="page-header">
-      <el-button link @click="goBack">&larr; 返回群组列表</el-button>
-    </div>
-
     <template v-if="groupDetail">
       <!-- 基础信息卡片 -->
       <el-card class="info-card">
         <template #header>
           <div class="card-header">
-            <span class="card-title">{{ groupDetail.group_name }}</span>
-            <el-tag :type="statusTagType(groupDetail.status)" size="large">
-              {{ statusLabel(groupDetail.status) }}
-            </el-tag>
-            <el-tag v-if="groupDetail.approval_status && groupDetail.approval_status !== 'none'"
-                    :type="approvalStatusType(groupDetail.approval_status)" size="large" style="margin-left: 4px;">
-              {{ approvalStatusLabel(groupDetail.approval_status) }}
-            </el-tag>
-            <el-button
-              v-if="canEdit"
-              type="primary"
-              size="small"
-              @click="showEditDialog"
-            >
-              编辑
-            </el-button>
+            <div class="header-left">
+              <el-button type="default" size="small" @click="goBack" class="back-btn">
+                <span class="back-icon"></span> 返回列表
+              </el-button>
+              <span class="card-title">{{ groupDetail.group_name }}</span>
+            </div>
+            <div class="header-right">
+              <el-tag :type="statusTagType(groupDetail.status)" size="default">
+                {{ statusLabel(groupDetail.status) }}
+              </el-tag>
+              <el-tag v-if="groupDetail.approval_status && groupDetail.approval_status !== 'none'"
+                      :type="approvalStatusType(groupDetail.approval_status)" size="default">
+                {{ approvalStatusLabel(groupDetail.approval_status) }}
+              </el-tag>
+              <el-button
+                v-if="canEdit"
+                type="primary"
+                size="small"
+                @click="showEditDialog"
+              >
+                编辑
+              </el-button>
+            </div>
           </div>
         </template>
         <el-descriptions :column="3" border>
@@ -43,7 +45,7 @@
 
       <!-- 统计卡片 -->
       <el-row :gutter="16" class="stat-row">
-        <el-col :span="3" v-for="stat in statCards" :key="stat.label">
+        <el-col :span="6" v-for="stat in statCards" :key="stat.label">
           <el-card class="stat-card" shadow="hover">
             <div class="stat-value">{{ stat.value }}</div>
             <div class="stat-label">{{ stat.label }}</div>
@@ -54,11 +56,8 @@
       <!-- Tab 面板 -->
       <el-card class="tab-card">
         <el-tabs v-model="activeTab" @tab-change="handleTabChange">
-          <!-- 成员机构 Tab -->
-          <el-tab-pane label="成员机构" name="members">
-            <div class="tab-toolbar" v-if="canManage">
-              <el-button type="primary" size="small" @click="showAddMemberDialog">添加成员机构</el-button>
-            </div>
+          <!-- 群机构 Tab（一期只读展示） -->
+          <el-tab-pane label="群机构" name="members">
             <el-table :data="memberList" v-loading="membersLoading" border stripe>
               <el-table-column prop="agency_name" label="机构名称" min-width="200" />
               <el-table-column prop="member_role" label="成员角色" width="120">
@@ -80,57 +79,31 @@
                 </template>
               </el-table-column>
               <el-table-column prop="joined_at" label="加入时间" width="170" />
-              <el-table-column v-if="canManage" label="操作" width="100" fixed="right">
-                <template #default="{ row }">
-                  <el-button
-                    v-if="!row.is_lead && row.join_status === 'active'"
-                    type="danger"
-                    link
-                    size="small"
-                    @click="handleRemoveMember(row)"
-                  >
-                    移除
-                  </el-button>
-                </template>
-              </el-table-column>
             </el-table>
           </el-tab-pane>
 
-          <!-- 用户授权 Tab -->
-          <el-tab-pane label="用户授权" name="users">
-            <div class="tab-toolbar" v-if="canManage">
-              <el-button type="primary" size="small" @click="showAddUserDialog">添加用户</el-button>
+          <!-- 群用户 Tab（一期只读展示，基于成员机构自动归属） -->
+          <el-tab-pane label="群用户" name="users">
+            <div class="tab-toolbar">
+              <span class="readonly-hint">成员机构下所有已启用用户自动归属该群组</span>
             </div>
             <el-table :data="userList" v-loading="usersLoading" border stripe>
               <el-table-column prop="username" label="用户名" width="120" />
               <el-table-column prop="real_name" label="真实姓名" width="120" />
               <el-table-column prop="agency_name" label="所属机构" min-width="160" />
-              <el-table-column label="群组角色" min-width="180">
+              <el-table-column prop="user_status" label="用户状态" width="100">
                 <template #default="{ row }">
-                  <el-tag
-                    v-for="role in row.roles"
-                    :key="`${role.role_code}-${role.scope_id}`"
-                    :type="roleTagType(role.role_code)"
-                    size="small"
-                    class="role-tag"
-                  >
-                    {{ groupRoleLabel(role.role_code) }}
+                  <el-tag :type="row.user_status === 'active' ? 'success' : 'danger'" size="small">
+                    {{ row.user_status === 'active' ? '启用' : '禁用' }}
                   </el-tag>
-                  <span v-if="!row.roles.length">-</span>
-                </template>
-              </el-table-column>
-              <el-table-column v-if="canManage" label="操作" width="200" fixed="right">
-                <template #default="{ row }">
-                  <el-button type="warning" link size="small" @click="showChangeRoleDialog(row)">改角色</el-button>
-                  <el-button type="danger" link size="small" @click="handleRemoveUser(row)">移出</el-button>
                 </template>
               </el-table-column>
             </el-table>
           </el-tab-pane>
 
-          <!-- 节点授权 Tab -->
-          <el-tab-pane label="节点授权" name="nodes">
-            <div class="tab-toolbar" v-if="canManage">
+          <!-- 群节点 Tab -->
+          <el-tab-pane label="群节点" name="nodes">
+            <div class="tab-toolbar" v-if="canManageNodes">
               <el-button type="primary" size="small" @click="showAddNodeDialog">授权节点</el-button>
             </div>
             <el-table :data="nodeList" v-loading="nodesLoading" border stripe>
@@ -295,25 +268,18 @@
             <el-tag size="small">{{ nodeTypeLabel(row.node_type) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="80" align="center">
+        <el-table-column label="操作" width="80" fixed="right">
           <template #default="{ row }">
-            <el-tag v-if="row.authorized" type="success" size="small">已授权</el-tag>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right">
-          <template #default="{ row }">
-            <el-button
-              v-if="!row.authorized"
-              type="primary"
-              link
-              size="small"
-              @click="handleAddNode(row)"
-            >
+            <el-button type="primary" link size="small" @click="handleAddNode(row)">
               授权
             </el-button>
           </template>
         </el-table-column>
+        <template #empty>
+          <div class="empty-nodes-hint">
+            暂无可授权节点，请先在基础资源管理中登记成员机构节点，或确认该节点尚未授权给本群组
+          </div>
+        </template>
       </el-table>
     </el-dialog>
   </div>
@@ -416,6 +382,13 @@ const canManage = computed(() => {
   return authStore.hasPermission ? (authStore.hasPermission('group:manage') || authStore.hasPermission('group:update')) : true
 })
 
+const canManageNodes = computed(() => {
+  if (!groupDetail.value) return false
+  if (['archived', 'rejected', 'dissolved'].includes(groupDetail.value.status)) return false
+  if (authStore.isPlatformAdmin) return true
+  return authStore.hasRole ? authStore.hasRole('admin', 'agency') : false
+})
+
 // ============================================================
 // 统计卡片
 // ============================================================
@@ -424,14 +397,10 @@ const statCards = computed(() => {
   if (!groupDetail.value) return []
   const s = groupDetail.value.summary
   return [
-    { label: '成员机构', value: s.member_count },
-    { label: '用户数', value: s.user_count },
-    { label: '管理员', value: s.admin_count },
-    { label: '治理员', value: s.governor_count },
-    { label: '授权节点', value: s.node_count },
-    { label: '任务数', value: s.task_count },
-    { label: '结果数', value: s.result_count },
-    { label: '存证数', value: s.chain_record_count },
+    { label: '成员机构', value: s.member_count || 0 },
+    { label: '群组用户', value: s.user_count || 0 },
+    { label: '授权节点', value: s.node_count || 0 },
+    { label: '统计任务', value: s.task_count || 0 },
   ]
 })
 
@@ -913,15 +882,39 @@ onMounted(async () => {
 
 <style scoped>
 .group-detail-page { padding: 20px; }
-.page-header { margin-bottom: 16px; }
 .info-card { margin-bottom: 20px; }
-.card-header { display: flex; align-items: center; gap: 12px; }
-.card-title { font-size: 18px; font-weight: 600; }
+.card-header { 
+  display: flex; 
+  align-items: center; 
+  justify-content: space-between;
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.back-btn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.back-icon {
+  margin-right: 4px;
+  font-weight: 600;
+}
+.card-title { font-size: 18px; font-weight: 600; color: #303133; }
 .stat-row { margin-bottom: 20px; }
 .stat-card { text-align: center; }
 .stat-value { font-size: 28px; font-weight: 700; color: #409eff; }
 .stat-label { font-size: 13px; color: #909399; margin-top: 4px; }
 .tab-card { margin-bottom: 20px; }
 .tab-toolbar { margin-bottom: 12px; }
+.readonly-hint { font-size: 13px; color: #909399; }
 .role-tag { margin-right: 4px; }
+.empty-nodes-hint { padding: 40px 20px; text-align: center; color: #909399; font-size: 14px; }
 </style>

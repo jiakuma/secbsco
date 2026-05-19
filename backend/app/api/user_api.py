@@ -201,6 +201,76 @@ def list_users(
     })
 
 
+@router.get("/switch-options")
+def get_switch_options(
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    """获取可切换用户列表（用于开发环境切换用户下拉）。"""
+    users = (
+        db.query(SysUser)
+        .filter(SysUser.status == "active")
+        .order_by(SysUser.id.asc())
+        .all()
+    )
+
+    items = []
+    for u in users:
+        agency_name = None
+        if u.agency_id:
+            agency = db.query(Agency).filter(Agency.id == u.agency_id).first()
+            agency_name = agency.agency_name if agency else None
+
+        roles = (
+            db.query(SysUserRoleBinding)
+            .filter(
+                SysUserRoleBinding.user_id == u.id,
+                SysUserRoleBinding.status == "active",
+            )
+            .all()
+        )
+
+        primary_role = None
+        if roles:
+            admin_roles = [r for r in roles if r.role_code == "admin"]
+            if admin_roles:
+                primary_role = admin_roles[0]
+            else:
+                primary_role = roles[0]
+
+        role_label = None
+        if primary_role:
+            if primary_role.role_code == "admin":
+                if primary_role.scope_type == "platform":
+                    role_label = "平台管理员"
+                elif primary_role.scope_type == "agency":
+                    role_label = "机构管理员"
+                elif primary_role.scope_type == "group":
+                    role_label = "群组管理员"
+                else:
+                    role_label = "管理员"
+            elif primary_role.role_code == "governor":
+                role_label = "治理员"
+            elif primary_role.role_code == "business":
+                role_label = "业务用户"
+            else:
+                role_label = primary_role.role_code
+
+        items.append({
+            "id": u.id,
+            "username": u.username,
+            "real_name": u.real_name or u.username,
+            "agency_id": u.agency_id,
+            "agency_name": agency_name,
+            "role_code": primary_role.role_code if primary_role else None,
+            "scope_type": primary_role.scope_type if primary_role else None,
+            "role_label": role_label,
+            "status": u.status,
+        })
+
+    return success(items)
+
+
 @router.get("/{user_id}")
 def get_user_detail(
     user_id: int,

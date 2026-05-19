@@ -80,3 +80,19 @@ export function addUserToGroup(userId: number, data: any) {
 export function removeUserFromGroup(userId: number, groupId: number) {
   return request.delete(`/api/users/${userId}/groups/${groupId}`)
 }
+
+export interface SwitchUserOption {
+  id: number
+  username: string
+  real_name: string
+  agency_id: number | null
+  agency_name: string | null
+  role_code: string | null
+  scope_type: string | null
+  role_label: string | null
+  status: string
+}
+
+export function getSwitchUserOptions() {
+  return request.get('/api/users/switch-options')
+}

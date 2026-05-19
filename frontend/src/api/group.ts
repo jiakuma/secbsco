@@ -7,6 +7,9 @@ import request from './request'
 export interface GroupListParams {
   keyword?: string
   status?: string
+  approval_status?: string
+  lead_agency_id?: number
+  category?: string
   region_code?: string
   page?: number
   page_size?: number
@@ -31,6 +34,13 @@ export interface GroupItem {
   member_count: number
   user_count: number
   node_count: number
+  task_count: number
+  my_relation: string
+  can_manage: boolean
+  can_approve: boolean
+  can_delete: boolean
+  need_delete_approval: boolean
+  can_approve_delete: boolean
 }
 
 /** 群组详情 */
@@ -262,4 +272,19 @@ export function addGroupNode(groupId: number, data: { node_id: number; remark?: 
 /** 取消节点授权 */
 export function removeGroupNode(groupId: number, nodeId: number) {
   return request.delete(`/api/groups/${groupId}/nodes/${nodeId}`)
+}
+
+/** 申请删除群组 */
+export function requestDeleteGroup(groupId: number) {
+  return request.post(`/api/groups/${groupId}/delete-request`)
+}
+
+/** 审批通过删除群组 */
+export function approveDeleteGroup(groupId: number) {
+  return request.post(`/api/groups/${groupId}/delete-approve`)
+}
+
+/** 驳回删除群组申请 */
+export function rejectDeleteGroup(groupId: number, data: { reason: string }) {
+  return request.post(`/api/groups/${groupId}/delete-reject`, data)
 }

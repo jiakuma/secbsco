@@ -21,11 +21,18 @@
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item
-                v-for="user in devUsers"
-                :key="user.username"
-                :command="user.username"
+                v-for="user in switchUserOptions"
+                :key="user.id"
+                :command="user.id"
               >
-                {{ user.label }}
+                <div class="switch-user-item">
+                  <div class="switch-user-name">{{ user.real_name }}</div>
+                  <div class="switch-user-meta">
+                    {{ user.username }}
+                    <span v-if="user.agency_name"> / {{ user.agency_name }}</span>
+                    <span v-if="user.role_label"> / {{ user.role_label }}</span>
+                  </div>
+                </div>
               </el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -63,34 +70,13 @@
     <main class="main-content">
       <header class="layout-header">
         <div class="header-left">
-          <div class="breadcrumb-line">
-            <span>首页</span>
-            <span class="breadcrumb-separator">/</span>
-            <span>{{ currentTitle }}</span>
-          </div>
           <div class="layout-title">{{ currentTitle }}</div>
         </div>
 
         <div class="header-right">
-          <div class="header-group" v-if="authStore.currentGroupName">
-            <span class="header-label">群组</span>
-            <span class="header-value">{{ authStore.currentGroupName }}</span>
-          </div>
-
           <div class="header-user">
-            <span class="header-label">当前用户</span>
             <span class="header-value">{{ authStore.displayName }}</span>
           </div>
-
-          <el-tag
-            v-for="role in headerRoles"
-            :key="`top-${role.role_code}-${role.scope_type}-${role.scope_id}`"
-            :type="getRoleTagType(role.role_code)"
-            size="small"
-            effect="light"
-          >
-            {{ getRoleLabel(role) }}
-          </el-tag>
         </div>
       </header>
 
@@ -106,6 +92,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { getSwitchUserOptions, type SwitchUserOption } from '@/api/user'
+import request from '@/api/request'
 
 interface SidebarMenuItem {
   title: string
@@ -113,57 +101,13 @@ interface SidebarMenuItem {
   icon: string
 }
 
-interface DevUserItem {
-  label: string
-  username: string
-  password: string
-  redirectPath: string
-}
-
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 
 const devUserSwitchLoading = ref(false)
-
-const devUsers: DevUserItem[] = [
-  {
-    label: '平台管理员',
-    username: 'platform_admin',
-    password: '123456',
-    redirectPath: '/base-resource',
-  },
-  {
-    label: '国家级机构管理员',
-    username: 'national_agency_admin',
-    password: '123456',
-    redirectPath: '/base-resource',
-  },
-  {
-    label: '省级机构管理员',
-    username: 'hebei_agency_admin',
-    password: '123456',
-    redirectPath: '/base-resource',
-  },
-  {
-    label: '市级机构管理员',
-    username: 'shijiazhuang_agency_admin',
-    password: '123456',
-    redirectPath: '/base-resource',
-  },
-  {
-    label: '业务用户',
-    username: 'changan_business_user',
-    password: '123456',
-    redirectPath: '/tasks',
-  },
-  {
-    label: '治理员',
-    username: 'hebei_governor',
-    password: '123456',
-    redirectPath: '/tasks',
-  },
-]
+const switchUserOptions = ref<SwitchUserOption[]>([])
+const switchOptionsLoading = ref(false)
 
 const adminMenus: SidebarMenuItem[] = [
   { title: '首页总览', path: '/dashboard', icon: '⌂' },
@@ -239,13 +183,6 @@ const headerRoles = computed(() => {
 })
 
 const currentRoleLabel = computed(() => {
-  const currentUsername = authStore.userInfo?.username
-  const matchedDevUser = devUsers.find((user) => user.username === currentUsername)
-
-  if (matchedDevUser) {
-    return matchedDevUser.label
-  }
-
   if (authStore.displayName) {
     return authStore.displayName
   }
@@ -296,29 +233,62 @@ function getRoleLabel(role: any): string {
   return `${scope}${roleName}`
 }
 
-async function handleDevUserChange(username: string) {
-  const targetUser = devUsers.find((u) => u.username === username)
+async function handleDevUserChange(userId: number) {
+  const targetUser = switchUserOptions.value.find((u) => u.id === userId)
   if (!targetUser) return
 
   try {
     devUserSwitchLoading.value = true
 
-    await authStore.login({
-      username: targetUser.username,
-      password: targetUser.password,
-    })
+    const res: any = await request.post('/api/auth/dev-switch', { user_id: userId })
+    const data = res.data || {}
+    const token = data.access_token || data.token
 
-    ElMessage.success(`已切换为${targetUser.label}`)
-    router.push(targetUser.redirectPath)
+    authStore.token = token
+    authStore.tokenType = data.token_type || 'bearer'
+    authStore.userInfo = data.user || null
+
+    localStorage.setItem('access_token', authStore.token)
+    localStorage.setItem('token_type', authStore.tokenType)
+    if (authStore.userInfo) {
+      localStorage.setItem('user_info', JSON.stringify(authStore.userInfo))
+    }
+
+    await authStore.fetchCurrentUser()
+
+    ElMessage.success(`已切换为${targetUser.real_name}`)
+
+    const hasAdminRole = authStore.roles.some((r) => r.role_code === 'admin')
+    if (hasAdminRole) {
+      router.push('/base-resource')
+    } else {
+      router.push('/tasks')
+    }
   } catch (error: any) {
     ElMessage.error(
       error?.response?.data?.detail ||
       error?.response?.data?.message ||
       error?.message ||
-      '切换用户失败，请确认测试账号和密码是否正确',
+      '切换用户失败',
     )
   } finally {
     devUserSwitchLoading.value = false
+  }
+}
+
+async function loadSwitchUserOptions() {
+  if (switchUserOptions.value.length > 0) return
+
+  try {
+    switchOptionsLoading.value = true
+    const res: any = await getSwitchUserOptions()
+    const data = res.data || []
+    switchUserOptions.value = Array.isArray(data) ? data : []
+  } catch (error) {
+    console.warn('[MainLayout] 加载切换用户列表失败:', error)
+    switchUserOptions.value = []
+  } finally {
+    switchOptionsLoading.value = false
   }
 }
 
@@ -345,6 +315,8 @@ onMounted(async () => {
       // 菜单加载失败时交给页面鉴权处理
     }
   }
+
+  loadSwitchUserOptions()
 })
 </script>
 
@@ -422,6 +394,23 @@ onMounted(async () => {
 .role-arrow {
   font-size: 10px;
   color: #94a3b8;
+}
+
+.switch-user-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.switch-user-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.switch-user-meta {
+  font-size: 11px;
+  color: #64748b;
 }
 
 .side-menu {
