@@ -72,6 +72,14 @@ const router = createRouter({
           },
         },
         {
+          path: 'data-resources',
+          name: 'DataResource',
+          component: () => import('@/views/DataResourceView.vue'),
+          meta: {
+            title: '数据资源',
+          },
+        },
+        {
           path: 'blockchain',
           name: 'BlockchainGovernance',
           component: () => import('@/views/BlockchainGovernanceView.vue'),

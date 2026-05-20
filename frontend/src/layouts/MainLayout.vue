@@ -112,7 +112,7 @@ const switchOptionsLoading = ref(false)
 const adminMenus: SidebarMenuItem[] = [
   { title: '首页总览', path: '/dashboard', icon: '⌂' },
   { title: '基础资源管理', path: '/base-resource', icon: '▦' },
-  { title: '数据资产管理', path: '/data-assets', icon: '▤' },
+  { title: '数据资源', path: '/data-resources', icon: '▤' },
   { title: '群组协作管理', path: '/groups', icon: '◇' },
   { title: '任务管理', path: '/tasks', icon: '▣' },
 ]
@@ -153,7 +153,8 @@ const activeMenu = computed(() => {
     '/base-resource/': '/base-resource',
     '/user-manage': '/base-resource',
     '/user-manage/': '/base-resource',
-    '/data-assets': '/data-assets',
+    '/data-resources': '/data-resources',
+    '/data-resources/': '/data-resources',
     '/groups': '/groups',
     '/groups/': '/groups',
     '/tasks': '/tasks',
