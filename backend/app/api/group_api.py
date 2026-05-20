@@ -39,6 +39,83 @@ router = APIRouter(prefix="/api/groups", tags=["群组管理"])
 
 
 # ============================================================
+# 用户可见群组（用于任务管理下拉）
+# ============================================================
+
+@router.get("/visible-for-task")
+def get_visible_groups_for_task(
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    """
+    获取当前用户可见群组列表（用于任务管理下拉菜单）。
+
+    权限规则：
+    - 平台管理员：可见全部群组
+    - 机构管理员：可见本机构及下辖机构参与的群组
+    - 业务用户：可见自己所属机构参与的群组
+    """
+    try:
+        from app.services.access_control_service import (
+            is_platform_admin,
+            is_agency_admin,
+        )
+        from app.models.group import GroupInfo, GroupMember
+        from app.models.agency import Agency
+
+        if is_platform_admin(db, current_user.id):
+            groups = db.query(GroupInfo).filter(GroupInfo.status == "active").order_by(GroupInfo.id.desc()).all()
+        else:
+            user_agency_id = current_user.agency_id
+            if not user_agency_id:
+                return success(data=[])
+
+            agency_ids = [user_agency_id]
+            if is_agency_admin(db, current_user.id):
+                def collect_descendants(parent_id: int):
+                    children = db.query(Agency.id).filter(
+                        Agency.parent_agency_id == parent_id,
+                        Agency.status == "active",
+                    ).all()
+                    for child in children:
+                        child_id = child[0]
+                        if child_id not in agency_ids:
+                            agency_ids.append(child_id)
+                            collect_descendants(child_id)
+                collect_descendants(user_agency_id)
+
+            group_ids = (
+                db.query(GroupMember.group_id)
+                .filter(
+                    GroupMember.agency_id.in_(agency_ids),
+                    GroupMember.join_status == "active",
+                )
+                .distinct()
+                .all()
+            )
+            group_id_list = [g[0] for g in group_ids]
+
+            groups = (
+                db.query(GroupInfo)
+                .filter(
+                    GroupInfo.id.in_(group_id_list),
+                    GroupInfo.status == "active",
+                )
+                .order_by(GroupInfo.id.desc())
+                .all()
+            )
+
+        return success(data=[
+            {"id": g.id, "group_name": g.group_name, "group_code": g.group_code}
+            for g in groups
+        ])
+    except Exception as e:
+        if hasattr(e, "status_code"):
+            raise
+        return fail(message=str(e), code=500)
+
+
+# ============================================================
 # 群组列表
 # ============================================================
 

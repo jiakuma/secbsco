@@ -1,6 +1,6 @@
 """Add node agent control fields.
 
-Revision ID: 006
+Revision ID: 006_add_node_agent_fields
 Revises: 005_seed_default_demo_data
 Create Date: 2026-05-18
 
@@ -8,7 +8,7 @@ Create Date: 2026-05-18
 from alembic import op
 import sqlalchemy as sa
 
-revision = '006'
+revision = '006_add_node_agent_fields'
 down_revision = '005_seed_default_demo_data'
 branch_labels = None
 depends_on = None

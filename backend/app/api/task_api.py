@@ -867,7 +867,13 @@ def create_task(
     2. 后端从当前登录用户 current_user 中自动写入；
     3. creator_agency_id 如果前端已经选择，则保留前端选择；
        如果前端没传，则尝试使用当前用户所属机构。
+    4. 必须绑定 group_id，且用户必须有该群组访问权限。
     """
+    if not task_create.group_id:
+        raise HTTPException(status_code=400, detail="任务必须绑定群组，请先选择群组")
+
+    check_group_access(db, current_user.id, task_create.group_id)
+
     creator_user_id = getattr(current_user, "id", None)
     creator_agency_id = getattr(current_user, "agency_id", None)
 
@@ -1030,6 +1036,41 @@ def create_task_party(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    """
+    创建任务参与方。
+
+    校验规则：
+    1. 参与机构必须是任务所属群组的成员机构
+    2. 节点必须是该群组已授权的节点
+    """
+    from app.models.group import GroupMember, GroupNode
+
+    task = task_service.get_task_or_404(db, task_id)
+    group_id = getattr(task, "group_id", None)
+
+    if not group_id:
+        raise HTTPException(status_code=400, detail="任务未绑定群组，无法添加参与方")
+
+    check_group_access(db, current_user.id, group_id)
+
+    if party_create.agency_id:
+        is_member = db.query(GroupMember).filter(
+            GroupMember.group_id == group_id,
+            GroupMember.agency_id == party_create.agency_id,
+            GroupMember.join_status == "active",
+        ).first()
+        if not is_member:
+            raise HTTPException(status_code=400, detail="参与机构不在群组成员机构中")
+
+    if party_create.node_id:
+        is_authorized_node = db.query(GroupNode).filter(
+            GroupNode.group_id == group_id,
+            GroupNode.node_id == party_create.node_id,
+            GroupNode.auth_status == "active",
+        ).first()
+        if not is_authorized_node:
+            raise HTTPException(status_code=400, detail="节点未授权给该群组，请先在群组中授权节点")
+
     data = task_service.create_task_party(
         db=db,
         task_id=task_id,

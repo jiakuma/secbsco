@@ -167,19 +167,10 @@
         </template>
       </el-table-column>
       <el-table-column prop="created_at" label="创建时间" width="160" />
-      <el-table-column label="操作" width="240" fixed="right">
+      <el-table-column label="操作" width="200" fixed="right">
         <template #default="{ row }">
           <el-button type="primary" link size="small" @click="goDetail(row.id)">
             详情
-          </el-button>
-          <el-button
-            v-if="row.status === 'active'"
-            type="primary"
-            link
-            size="small"
-            @click="goTasks(row.id)"
-          >
-            任务
           </el-button>
           <el-button
             v-if="row.can_manage && row.status === 'active'"
@@ -910,10 +901,6 @@ async function confirmDeleteReject() {
 
 function goDetail(id: number) {
   router.push(`/groups/${id}`)
-}
-
-function goTasks(id: number) {
-  router.push(`/groups/${id}?tab=tasks`)
 }
 
 function goManage(id: number) {

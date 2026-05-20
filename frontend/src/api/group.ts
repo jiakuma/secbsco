@@ -288,3 +288,14 @@ export function approveDeleteGroup(groupId: number) {
 export function rejectDeleteGroup(groupId: number, data: { reason: string }) {
   return request.post(`/api/groups/${groupId}/delete-reject`, data)
 }
+
+/** 获取用户可见群组列表（用于任务管理下拉） */
+export interface VisibleGroupForTask {
+  id: number
+  group_name: string
+  group_code: string
+}
+
+export function getVisibleGroupsForTask() {
+  return request.get<{ code: number; message: string; data: VisibleGroupForTask[] }>('/api/groups/visible-for-task')
+}

@@ -15,6 +15,26 @@
     <main class="page-content">
       <el-card class="query-card" shadow="never">
         <el-form :inline="true" :model="queryForm" class="query-form">
+          <el-form-item label="当前群组">
+            <el-select
+              v-model="queryForm.group_id"
+              placeholder="请选择群组"
+              filterable
+              style="width: 280px"
+              @change="handleGroupChange"
+            >
+              <el-option
+                v-for="g in visibleGroups"
+                :key="g.id"
+                :label="g.group_name"
+                :value="g.id"
+              >
+                <span>{{ g.group_name }}</span>
+                <span style="color: #999; margin-left: 8px; font-size: 12px;">{{ g.group_code }}</span>
+              </el-option>
+            </el-select>
+          </el-form-item>
+
           <el-form-item label="任务名称">
             <el-input
               v-model="queryForm.keyword"
@@ -137,6 +157,18 @@
 
     <el-dialog v-model="createDialogVisible" title="构建协同计算任务" width="680px" destroy-on-close class="custom-dialog">
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="120px" class="tech-form">
+        <el-form-item label="所属群组" prop="group_id">
+          <el-select v-model="createForm.group_id" placeholder="请选择群组" filterable disabled style="width: 100%" :loading="groupsLoading">
+            <el-option v-for="g in visibleGroups" :key="g.id" :label="g.group_name" :value="g.id">
+              <span>{{ g.group_name }}</span>
+              <span style="color: #999; margin-left: 8px; font-size: 12px;">{{ g.group_code }}</span>
+            </el-option>
+          </el-select>
+          <div class="form-tip">
+            <el-icon><InfoFilled /></el-icon> 任务绑定当前群组，任务参与机构、节点必须来自该群组。
+          </div>
+        </el-form-item>
+
         <el-form-item label="任务编号" prop="task_code">
           <el-input v-model="createForm.task_code" placeholder="例如 FLU_TASK_20260504_001" class="mono-input" />
         </el-form-item>
@@ -213,8 +245,10 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { getAgencyList } from '@/api/agency'
 import { getStatTemplateList } from '@/api/statTemplate'
+import { getVisibleGroupsForTask, type VisibleGroupForTask } from '@/api/group'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 // 引入所需的图标
@@ -233,6 +267,7 @@ import {
 } from '@/constants/taskScenario'
 
 // --- 以下核心逻辑完全保留原有代码 ---
+const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
 const creating = ref(false)
@@ -244,8 +279,10 @@ const agencyOptions = ref<any[]>([])
 const templateOptions = ref<any[]>([])
 const agencyLoading = ref(false)
 const templateLoading = ref(false)
+const visibleGroups = ref<VisibleGroupForTask[]>([])
+const groupsLoading = ref(false)
 
-const queryForm = reactive({ page: 1, page_size: 10, keyword: '', status: '', task_type: '', scenario_code: '' })
+const queryForm = reactive({ page: 1, page_size: 10, keyword: '', status: '', task_type: '', scenario_code: '', group_id: null as number | null })
 
 const createDialogVisible = ref(false)
 const createFormRef = ref<FormInstance>()
@@ -253,7 +290,7 @@ const statRange = ref<string[]>([])
 
 const createForm = reactive<CreateTaskPayload & { task_type: TaskType; scenario_code: ScenarioCode }>({
   task_code: '', task_name: '', task_type: 'statistic', scenario_code: 'infectious_spatiotemporal_prediction',
-  template_id: null, creator_agency_id: null, stat_start_time: '', stat_end_time: '', description: '',
+  template_id: null, creator_agency_id: null, stat_start_time: '', stat_end_time: '', description: '', group_id: null,
 })
 
 const createRules: FormRules = {
@@ -262,6 +299,7 @@ const createRules: FormRules = {
   task_type: [{ required: true, message: '请选择任务类型', trigger: 'change' }],
   scenario_code: [{ required: true, message: '请选择任务场景', trigger: 'change' }],
   creator_agency_id: [{ required: true, message: '请选择创建机构', trigger: 'change' }],
+  group_id: [{ required: true, message: '请选择所属群组', trigger: 'change' }],
 }
 
 // 辅助方法：复制文本
@@ -309,16 +347,46 @@ async function loadTemplateOptions() {
 }
 
 async function loadTasks() {
+  if (!queryForm.group_id) {
+    taskList.value = []
+    total.value = 0
+    return
+  }
   loading.value = true
   try {
     const res = await getTaskList({
       page: queryForm.page, page_size: queryForm.page_size,
       keyword: queryForm.keyword || undefined, status: queryForm.status || undefined,
+      group_id: queryForm.group_id,
     })
     const normalized = normalizeList(unwrapResponse(res))
     taskList.value = normalized.list
     total.value = normalized.total
   } catch (error) { ElMessage.error('任务列表加载失败') } finally { loading.value = false }
+}
+
+async function loadVisibleGroups() {
+  groupsLoading.value = true
+  try {
+    const res = await getVisibleGroupsForTask()
+    const data = unwrapResponse(res)
+    visibleGroups.value = Array.isArray(data) ? data : []
+  } catch (error) {
+    ElMessage.error('群组列表加载失败')
+  } finally {
+    groupsLoading.value = false
+  }
+}
+
+function handleGroupChange() {
+  if (!queryForm.group_id) {
+    ElMessage.warning('请选择群组以查看任务')
+    taskList.value = []
+    total.value = 0
+    return
+  }
+  queryForm.page = 1
+  loadTasks()
 }
 
 function resetQuery() {
@@ -328,6 +396,10 @@ function resetQuery() {
 }
 
 async function openCreateDialog() {
+  if (!queryForm.group_id) {
+    ElMessage.warning('请先选择群组')
+    return
+  }
   createDialogVisible.value = true
   createForm.task_code = `FLU_TASK_${Date.now()}`
   createForm.task_name = ''
@@ -336,8 +408,9 @@ async function openCreateDialog() {
   createForm.template_id = null
   createForm.creator_agency_id = null
   createForm.description = ''
+  createForm.group_id = queryForm.group_id
   statRange.value = []
-  await Promise.all([loadAgencyOptions(), loadTemplateOptions()])
+  await Promise.all([loadAgencyOptions(), loadTemplateOptions(), loadVisibleGroups()])
 }
 
 function handleTaskTypeChange() {
@@ -374,6 +447,7 @@ async function handleCreate() {
   if (!createFormRef.value) return
   await createFormRef.value.validate(async (valid) => {
     if (!valid) return
+    if (!createForm.group_id) { ElMessage.warning('请选择所属群组'); return }
     if (createForm.task_type === 'statistic' && !createForm.template_id) { ElMessage.warning('请选择统计模板'); return }
     if (createForm.task_type === 'federated_learning' && !createForm.scenario_code) { ElMessage.warning('请选择联邦学习任务场景'); return }
     if (!createForm.creator_agency_id) { ElMessage.warning('请选择创建机构'); return }
@@ -388,6 +462,7 @@ async function handleCreate() {
         stat_start_time: isFederated ? undefined : statRange.value?.[0] || undefined,
         stat_end_time: isFederated ? undefined : statRange.value?.[1] || undefined,
         params_json: isFederated ? buildRealFederatedLearningParamsJson(createForm.scenario_code) : buildTaskParamsJson(createForm.task_type, undefined),
+        group_id: createForm.group_id,
       }
       await createTask(payload)
       ElMessage.success('任务初始化调度成功')
@@ -458,7 +533,17 @@ function getRunButtonText(row: any) {
   return isFlTask ? '下发联邦' : '触发计算'
 }
 
-onMounted(() => { loadTasks() })
+onMounted(async () => {
+  await loadVisibleGroups()
+  const queryGroupId = route.query.group_id
+  if (queryGroupId) {
+    const gid = Number(queryGroupId)
+    if (!isNaN(gid)) {
+      queryForm.group_id = gid
+    }
+  }
+  await loadTasks()
+})
 </script>
 
 <style scoped>

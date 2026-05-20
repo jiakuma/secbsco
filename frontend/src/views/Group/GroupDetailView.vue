@@ -20,6 +20,13 @@
                 {{ approvalStatusLabel(groupDetail.approval_status) }}
               </el-tag>
               <el-button
+                type="success"
+                size="small"
+                @click="goToTaskManagement"
+              >
+                进入任务管理
+              </el-button>
+              <el-button
                 v-if="canEdit"
                 type="primary"
                 size="small"
@@ -787,6 +794,10 @@ async function handleRemoveNode(row: GroupNodeItem) {
 
 function goBack() {
   router.push('/groups')
+}
+
+function goToTaskManagement() {
+  router.push({ path: '/tasks', query: { group_id: groupId } })
 }
 
 // ============================================================
