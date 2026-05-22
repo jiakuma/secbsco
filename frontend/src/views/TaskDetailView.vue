@@ -15,7 +15,7 @@
           :disabled="running"
           @click="handleRun"
         >
-          {{ isFederatedLearningTask(taskDetail) ? '下发联邦计算指令' : '触发协同统计' }}
+          执行任务
         </el-button>
       </div>
     </header>
@@ -165,7 +165,7 @@
             </div>
           </div>
           <el-button type="success" :icon="VideoPlay" @click="handleRun">
-            {{ isFederatedLearningTask(taskDetail) ? '下发联邦计算指令' : '下发协同统计指令' }}
+            执行任务
           </el-button>
         </div>
       </el-card>
@@ -389,14 +389,12 @@ async function handleRun() {
   }
 
   const isFlTask = isFederatedLearningTask(taskDetail.value)
-  const confirmText = isFlTask
-    ? '确认下发联邦计算指令并进入训练结果页面吗？'
-    : '确认下发协同统计指令并进入结果页面吗？'
+  const confirmText = '确认执行任务并进入结果页面吗？'
 
   try {
-    await ElMessageBox.confirm(confirmText, '下发确认', {
+    await ElMessageBox.confirm(confirmText, '执行确认', {
       type: 'warning',
-      confirmButtonText: '下发并进入结果页',
+      confirmButtonText: '执行任务',
       cancelButtonText: '取消',
     })
 
