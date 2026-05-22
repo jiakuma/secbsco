@@ -130,7 +130,10 @@ def _build_dataset_info(dataset: Dataset, db: Session) -> dict:
         "node_name": node.node_name if node else None,
         "data_type": dataset.data_type,
         "data_location": dataset.data_location,
+        "storage_uri": dataset.storage_uri,
+        "dataset_type": dataset.dataset_type,
         "description": dataset.description,
+        "status": dataset.status,
         "created_at": str(dataset.created_at) if dataset.created_at else None,
         "updated_at": str(dataset.updated_at) if dataset.updated_at else None,
     }
@@ -156,12 +159,14 @@ def create_dataset(
     
     dataset = Dataset(
         agency_id=dataset_req.agency_id,
-        node_id=getattr(dataset_req, 'node_id', None),
+        node_id=dataset_req.node_id,
         dataset_code=dataset_req.dataset_code,
         dataset_name=dataset_req.dataset_name,
-        data_type=getattr(dataset_req, 'data_type', None),
-        data_location=getattr(dataset_req, 'data_location', None),
-        description=getattr(dataset_req, 'description', None),
+        data_type=dataset_req.data_type,
+        data_location=dataset_req.data_location,
+        storage_uri=dataset_req.storage_uri or dataset_req.data_location,
+        dataset_type=dataset_req.dataset_type,
+        description=dataset_req.description,
         created_by=current_user.id,
     )
     

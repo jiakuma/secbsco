@@ -126,6 +126,56 @@ class GroupNode(Base):
     )
 
 
+class GroupDataset(Base):
+    """群组数据集授权表"""
+    __tablename__ = "group_dataset"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    group_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="群组ID")
+    agency_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="机构ID")
+    dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="数据集ID")
+    auth_status: Mapped[str] = mapped_column(String(32), default="active", nullable=False,
+                                              comment="授权状态: active/revoked")
+    authorized_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="授权人用户ID")
+    authorized_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="授权时间")
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="撤销时间")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("group_id", "dataset_id", name="uk_group_dataset_group_dataset"),
+        Index("idx_group_dataset_group_id", "group_id"),
+        Index("idx_group_dataset_dataset_id", "dataset_id"),
+        Index("idx_group_dataset_agency_id", "agency_id"),
+        Index("idx_group_dataset_auth_status", "auth_status"),
+    )
+
+
+class GroupTaskTemplate(Base):
+    """群组任务模板授权表"""
+    __tablename__ = "group_task_template"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    group_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="群组ID")
+    agency_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="机构ID")
+    template_id: Mapped[int] = mapped_column(BigInteger, nullable=False, comment="任务模板ID")
+    auth_status: Mapped[str] = mapped_column(String(32), default="active", nullable=False,
+                                              comment="授权状态: active/revoked")
+    authorized_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, comment="授权人用户ID")
+    authorized_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="授权时间")
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, comment="撤销时间")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("group_id", "template_id", name="uk_group_task_template_group_template"),
+        Index("idx_group_task_template_group_id", "group_id"),
+        Index("idx_group_task_template_template_id", "template_id"),
+        Index("idx_group_task_template_agency_id", "agency_id"),
+        Index("idx_group_task_template_auth_status", "auth_status"),
+    )
+
+
 class GroupLifecycleLog(Base):
     """群组生命周期日志表"""
     __tablename__ = "group_lifecycle_log"

@@ -488,6 +488,281 @@ def _run_secretflow_federated_learning_task(db: Session, task) -> dict:
         raise
 
 
+def _run_bio_task_runtime(db: Session, task, template) -> dict:
+    """
+    第九阶段：调用 bio-task-runtime 18190 执行 T2 任务。
+    """
+    import requests
+    from app.models.group import GroupDataset
+    from app.models.agency import Agency
+    from app.models.node import Node
+    from app.models.dataset import Dataset
+    from app.core.config import settings
+    
+    # 1. 查询参与方
+    parties = (
+        db.query(TaskParty)
+        .filter(TaskParty.task_id == task.id)
+        .order_by(TaskParty.id.asc())
+        .all()
+    )
+    
+    if not parties:
+        raise HTTPException(status_code=400, detail="任务参与方为空，无法执行任务")
+    
+    # 2. 组装 participants
+    participants = []
+    for party in parties:
+        agency = db.query(Agency).filter(Agency.id == party.agency_id).first()
+        node = db.query(Node).filter(Node.id == party.node_id).first() if party.node_id else None
+        dataset = db.query(Dataset).filter(Dataset.id == party.dataset_id).first() if party.dataset_id else None
+        
+        if not agency:
+            raise HTTPException(status_code=400, detail=f"参与方机构不存在：agency_id={party.agency_id}")
+        
+        # 转换角色
+        roles = []
+        if party.party_role:
+            roles = [r.strip() for r in party.party_role.split(",") if r.strip()]
+        
+        # 数据提供方必须有数据集
+        if "data_provider" in roles and not dataset:
+            raise HTTPException(
+                status_code=400,
+                detail=f"数据提供方缺少数据集配置：agency={agency.agency_name}"
+            )
+        
+        participant = {
+            "agency_code": agency.agency_code or f"AGENCY_{agency.id}",
+            "agency_name": agency.agency_name,
+            "district_code": agency.region_code or "",
+            "district_name": agency.region_name or "",
+            "node_code": node.node_code if node else "",
+            "node_name": node.node_name if node else "",
+            "dataset_name": dataset.dataset_name if dataset else "",
+            "dataset_path": dataset.data_location if dataset else "",
+            "roles": roles,
+        }
+        participants.append(participant)
+    
+    # 3. 查找辅助数据集
+    group_id = task.group_id
+    auxiliary_datasets = {
+        "grid_daily_stats_path": "",
+        "grid_catalog_path": "",
+    }
+    
+    if group_id:
+        group_datasets = db.query(GroupDataset).filter(
+            GroupDataset.group_id == group_id,
+            GroupDataset.auth_status == "active",
+        ).all()
+        
+        for gd in group_datasets:
+            ds = db.query(Dataset).filter(Dataset.id == gd.dataset_id).first()
+            if not ds:
+                continue
+            
+            # 匹配网格日统计数据
+            if "grid_daily_stats" in (ds.dataset_type or "") or "空间网格日统计" in (ds.dataset_name or ""):
+                auxiliary_datasets["grid_daily_stats_path"] = ds.data_location or ""
+            
+            # 匹配网格目录数据
+            if "grid_catalog" in (ds.dataset_type or "") or "空间网格目录" in (ds.dataset_name or ""):
+                auxiliary_datasets["grid_catalog_path"] = ds.data_location or ""
+    
+    # 4. 组装 task_context
+    params_json = _safe_json_dict(getattr(task, "params_json", None))
+    
+    task_context = {
+        "task_id": task.id,
+        "task_name": task.task_name,
+        "group_id": group_id,
+        "template_code": template.template_code if template else "T2_SPATIOTEMPORAL_TEMPLATE",
+        "template_version": "1.0.0",
+        "scenario_code": "infectious_spatiotemporal_prediction",
+        "disease_code": "J10.1",
+        "disease_name": "流感",
+        "participants": participants,
+        "auxiliary_datasets": auxiliary_datasets,
+        "params": {
+            "analysis_start_date": params_json.get("analysis_start_date", "2026-04-01"),
+            "analysis_end_date": params_json.get("analysis_end_date", "2026-04-30"),
+            "recent_window_days": params_json.get("recent_window_days", 7),
+            "prediction_window_days": params_json.get("prediction_window_days", 7),
+            "top_grid_n": params_json.get("top_grid_n", 10),
+            "common_exposure_min_cases": params_json.get("common_exposure_min_cases", 6),
+        },
+    }
+    
+    # 5. 更新任务状态为运行中
+    task.status = "running"
+    db.commit()
+    
+    # 6. 调用 bio-task-runtime
+    runtime_url = settings.BIO_TASK_RUNTIME_URL
+    timeout = settings.BIO_TASK_RUNTIME_TIMEOUT
+    
+    try:
+        response = requests.post(
+            f"{runtime_url}/tasks/run",
+            json={
+                "task_context": task_context,
+                "timeout_seconds": timeout,
+            },
+            timeout=timeout + 10,
+        )
+        
+        if response.status_code != 200:
+            task.status = "failed"
+            db.commit()
+            raise HTTPException(
+                status_code=502,
+                detail=f"任务运行服务返回错误：HTTP {response.status_code}"
+            )
+        
+        runtime_result = response.json()
+        
+        # 打印 Runtime response 前 3000 字符
+        runtime_str = str(runtime_result)
+        print(f"[DEBUG] Runtime response (first 3000 chars): {runtime_str[:3000]}")
+        
+    except requests.exceptions.ConnectionError:
+        task.status = "failed"
+        db.commit()
+        raise HTTPException(
+            status_code=502,
+            detail="任务运行服务不可用，请检查 bio-task-runtime 18190"
+        )
+    except requests.exceptions.Timeout:
+        task.status = "failed"
+        db.commit()
+        raise HTTPException(
+            status_code=504,
+            detail=f"任务执行超时（{timeout}秒）"
+        )
+    except Exception as e:
+        task.status = "failed"
+        db.commit()
+        raise HTTPException(status_code=500, detail=f"调用任务运行服务失败：{str(e)}")
+    
+    # 7. 检查 runtime 返回结果
+    runtime_success = (
+        runtime_result.get("success") is True
+        and runtime_result.get("status") == "success"
+        and runtime_result.get("result") is not None
+    )
+    
+    result = runtime_result.get("result", {})
+    result_hash = runtime_result.get("result_hash", "")
+    message = runtime_result.get("message", "")
+    
+    print(f"[DEBUG] Runtime success check: success={runtime_result.get('success')}, status={runtime_result.get('status')}, result_exists={result is not None}")
+    print(f"[DEBUG] runtime_success={runtime_success}")
+    
+    if not runtime_success:
+        task.status = "failed"
+        db.commit()
+        
+        # 写入失败结果（更新或插入）
+        existing_result = db.query(TaskResult).filter(TaskResult.task_id == task.id).first()
+        
+        if existing_result:
+            existing_result.result_json = runtime_result
+            existing_result.result_hash = result_hash
+            existing_result.status = "failed"
+            existing_result.error_message = message
+            existing_result.group_id = group_id
+            existing_result.agency_id = task.creator_agency_id
+            existing_result.task_type = "spatiotemporal_prediction"
+            existing_result.anchor_status = None
+            existing_result.anchor_time = None
+            existing_result.chain_record_id = None
+            if hasattr(existing_result, "result_version"):
+                existing_result.result_version = (existing_result.result_version or 1) + 1
+            task_result = existing_result
+        else:
+            task_result = TaskResult(
+                task_id=task.id,
+                result_json=runtime_result,
+                result_hash=result_hash,
+                status="failed",
+                error_message=message,
+                group_id=group_id,
+                agency_id=task.creator_agency_id,
+                task_type="spatiotemporal_prediction",
+                result_version=1,
+            )
+            db.add(task_result)
+        
+        db.commit()
+        
+        return {
+            "task_id": task.id,
+            "status": "failed",
+            "message": message,
+            "result_hash": result_hash,
+        }
+    
+    # 8. 写入成功结果（更新或插入）
+    from datetime import datetime
+    
+    existing_result = db.query(TaskResult).filter(TaskResult.task_id == task.id).first()
+    
+    if existing_result:
+        # 更新已有结果
+        existing_result.result_json = result
+        existing_result.result_hash = result_hash
+        existing_result.status = "success"
+        existing_result.error_message = None
+        existing_result.group_id = group_id
+        existing_result.agency_id = task.creator_agency_id or task.lead_agency_id
+        existing_result.task_type = "spatiotemporal_prediction"
+        existing_result.anchor_status = None
+        existing_result.anchor_time = None
+        existing_result.chain_record_id = None
+        if hasattr(existing_result, "result_version"):
+            existing_result.result_version = (existing_result.result_version or 1) + 1
+        if hasattr(existing_result, "updated_at"):
+            existing_result.updated_at = datetime.now()
+        task_result = existing_result
+        print(f"[INFO] Updated existing task_result for task_id={task.id}, result_id={task_result.id}")
+    else:
+        # 插入新结果
+        task_result = TaskResult(
+            task_id=task.id,
+            result_json=result,
+            result_hash=result_hash,
+            status="success",
+            error_message=None,
+            group_id=group_id,
+            agency_id=task.creator_agency_id or task.lead_agency_id,
+            task_type="spatiotemporal_prediction",
+            result_version=1,
+        )
+        db.add(task_result)
+        print(f"[INFO] Created new task_result for task_id={task.id}")
+    
+    # 更新任务状态
+    task.status = "success"
+    if hasattr(task, "updated_at"):
+        task.updated_at = datetime.now()
+    
+    db.commit()
+    db.refresh(task_result)
+    
+    print(f"[SUCCESS] Task {task.id} executed successfully, result_id={task_result.id}, result_hash={result_hash}")
+    
+    return {
+        "task_id": task.id,
+        "result_id": task_result.id,
+        "status": "success",
+        "message": "任务执行成功",
+        "result_hash": task_result.result_hash,
+        "duration_seconds": runtime_result.get("duration_seconds", 0),
+    }
+
+
 def _run_secretflow_statistic_task(db: Session, task) -> dict:
     """
     执行 SecretFlow 联合统计任务并写入 task_result。
@@ -1042,8 +1317,10 @@ def create_task_party(
     校验规则：
     1. 参与机构必须是任务所属群组的成员机构
     2. 节点必须是该群组已授权的节点
+    3. 数据提供方必须选择数据资源，后端自动解析dataset_id
     """
-    from app.models.group import GroupMember, GroupNode
+    from app.models.group import GroupMember, GroupNode, GroupDataset
+    from app.models.dataset import Dataset
 
     task = task_service.get_task_or_404(db, task_id)
     group_id = getattr(task, "group_id", None)
@@ -1071,10 +1348,56 @@ def create_task_party(
         if not is_authorized_node:
             raise HTTPException(status_code=400, detail="节点未授权给该群组，请先在群组中授权节点")
 
+    party_role = getattr(party_create, 'party_role', '') or ''
+    roles = [r.strip() for r in party_role.split(',') if r.strip()]
+    has_data_provider = 'data_provider' in roles
+
+    data_resource_name = getattr(party_create, 'data_resource_name', None)
+    
+    if has_data_provider:
+        if not party_create.dataset_id and not data_resource_name:
+            raise HTTPException(status_code=400, detail="数据提供方必须选择数据资源")
+        
+        if not party_create.dataset_id and data_resource_name:
+            dataset_query = db.query(Dataset).join(
+                GroupDataset, 
+                GroupDataset.dataset_id == Dataset.id
+            ).filter(
+                GroupDataset.group_id == group_id,
+                GroupDataset.auth_status == "active",
+                Dataset.agency_id == party_create.agency_id,
+                Dataset.dataset_name == data_resource_name,
+            )
+            
+            if party_create.node_id:
+                dataset_query = dataset_query.filter(Dataset.node_id == party_create.node_id)
+            
+            matching_datasets = dataset_query.all()
+            
+            if not matching_datasets:
+                node_hint = f"、节点ID={party_create.node_id}" if party_create.node_id else ""
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"未找到匹配的数据集：机构ID={party_create.agency_id}{node_hint}、数据资源名称='{data_resource_name}'。请检查数据集是否已授权给当前群组，或联系管理员添加数据授权。"
+                )
+            
+            if len(matching_datasets) > 1:
+                dataset_ids = [d.id for d in matching_datasets]
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"数据资源匹配到多条记录（dataset_id={dataset_ids}），请检查数据集名称、机构和节点配置是否唯一。建议联系管理员检查数据集配置。"
+                )
+            
+            party_create.dataset_id = matching_datasets[0].id
+
+    party_columns = {column.name for column in TaskParty.__table__.columns}
+    party_data = party_create.model_dump()
+    filtered_party_data = {k: v for k, v in party_data.items() if k in party_columns}
+
     data = task_service.create_task_party(
         db=db,
         task_id=task_id,
-        party_create=party_create,
+        party_data=filtered_party_data,
     )
 
     write_task_audit_log(
@@ -1359,19 +1682,35 @@ def run_task(
     """
     执行任务。
 
+    第九阶段：支持 T2 任务调用 bio-task-runtime 18190。
     第二十三阶段：
     - statistic：调用 Alice SecretFlow 联合统计服务，生成真实联合统计结果；
     - federated_learning：调用 Alice SecretFlow 联邦训练服务，生成真实训练结果。
     """
+    from app.models.stat_template import StatTemplate
+    
     task = task_service.get_task_or_404(db=db, task_id=task_id)
 
     # 权限校验：governor 不可执行任务
     check_task_run_access(db, current_user.id, getattr(task, "group_id", None))
 
+    # 判断任务类型：优先根据 template_code 判断
+    template = None
+    if task.template_id:
+        template = db.query(StatTemplate).filter(StatTemplate.id == task.template_id).first()
+    
+    template_code = template.template_code if template else None
     params_json = _safe_json_dict(getattr(task, "params_json", None))
     task_type = params_json.get("task_type") or "statistic"
 
-    if task_type == "federated_learning":
+    # T2 任务判断：template_code 以 "T2" 开头
+    if template_code and template_code.startswith("T2"):
+        data = _run_bio_task_runtime(
+            db=db,
+            task=task,
+            template=template,
+        )
+    elif task_type == "federated_learning":
         data = _run_secretflow_federated_learning_task(
             db=db,
             task=task,
@@ -1398,9 +1737,13 @@ def run_task(
             "task_id": task_id,
             "task_type": audit_result_json.get("task_type"),
             "executor": (
-                "secretflow_fl"
-                if audit_result_json.get("task_type") == "federated_learning"
-                else "secretflow"
+                "bio_task_runtime"
+                if template_code and template_code.startswith("T2")
+                else (
+                    "secretflow_fl"
+                    if audit_result_json.get("task_type") == "federated_learning"
+                    else "secretflow"
+                )
             ),
         },
         result_json=audit_result_json,

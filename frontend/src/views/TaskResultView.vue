@@ -1,6 +1,11 @@
 <template>
   <div class="task-result-page">
-    <header class="page-header">
+    <!-- T2 任务使用专用结果页面 -->
+    <T2TaskResultView v-if="isT2Task" />
+    
+    <!-- 其他任务使用原有结果页面 -->
+    <template v-else>
+      <header class="page-header">
       <div class="title-area">
         <h1>联邦计算结果</h1>
         <p>先展示训练过程动画，训练结束后展示指标、结果哈希与链上存证信息</p>
@@ -162,6 +167,7 @@
         </el-empty>
       </el-card>
     </main>
+    </template>
   </div>
 </template>
 
@@ -185,6 +191,7 @@ import { anchorTaskResult, getTaskDetail, getTaskParties, getTaskResult, runTask
 import { getChainRecordList } from '@/api/chainRecord'
 import { isFederatedLearningTask, parseJsonValue } from '@/constants/taskScenario'
 import FederatedAnimation from '@/components/FederatedAnimation.vue'
+import T2TaskResultView from './T2TaskResultView.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -198,6 +205,13 @@ const partyList = ref<any[]>([])
 const taskResult = ref<any>(null)
 const chainAnchorResult = ref<any>(null)
 const runStage = ref<'idle' | 'running' | 'success' | 'failed'>('idle')
+
+const isT2Task = computed(() => {
+  if (!taskDetail.value) return false
+  const paramsJson = taskDetail.value.params_json || {}
+  const templateCode = paramsJson.template_code || taskDetail.value.template_code || ''
+  return templateCode.startsWith('T2')
+})
 
 function unwrapResponse(res: any) {
   return res?.data?.data ?? res?.data ?? res

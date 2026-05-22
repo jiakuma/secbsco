@@ -299,3 +299,63 @@ export interface VisibleGroupForTask {
 export function getVisibleGroupsForTask() {
   return request.get<{ code: number; message: string; data: VisibleGroupForTask[] }>('/api/groups/visible-for-task')
 }
+
+/** 群组数据集授权 */
+export interface GroupDatasetItem {
+  id: number
+  dataset_id: number
+  dataset_name: string
+  dataset_code: string
+  agency_id: number
+  agency_name: string | null
+  node_id: number | null
+  data_type: string | null
+  data_location: string | null
+  authorized_at: string | null
+}
+
+export function getGroupDatasets(groupId: number) {
+  return request.get<{ code: number; message: string; data: GroupDatasetItem[] }>(`/api/groups/${groupId}/datasets`)
+}
+
+export function getAvailableGroupDatasets(groupId: number) {
+  return request.get<{ code: number; message: string; data: any[] }>(`/api/groups/${groupId}/available-datasets`)
+}
+
+export function addGroupDataset(groupId: number, datasetId: number) {
+  return request.post(`/api/groups/${groupId}/datasets`, { dataset_id: datasetId })
+}
+
+export function removeGroupDataset(groupId: number, datasetId: number) {
+  return request.delete(`/api/groups/${groupId}/datasets/${datasetId}`)
+}
+
+/** 群组任务模板授权 */
+export interface GroupTemplateItem {
+  id: number
+  template_id: number
+  template_name: string
+  template_code: string
+  agency_id: number | null
+  agency_name: string | null
+  scenario: string | null
+  exec_mode: string | null
+  output_type: string | null
+  authorized_at: string | null
+}
+
+export function getGroupTemplates(groupId: number) {
+  return request.get<{ code: number; message: string; data: GroupTemplateItem[] }>(`/api/groups/${groupId}/templates`)
+}
+
+export function getAvailableGroupTemplates(groupId: number) {
+  return request.get<{ code: number; message: string; data: any[] }>(`/api/groups/${groupId}/available-templates`)
+}
+
+export function addGroupTemplate(groupId: number, templateId: number) {
+  return request.post(`/api/groups/${groupId}/templates`, { template_id: templateId })
+}
+
+export function removeGroupTemplate(groupId: number, templateId: number) {
+  return request.delete(`/api/groups/${groupId}/templates/${templateId}`)
+}

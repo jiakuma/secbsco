@@ -53,6 +53,14 @@ def _get_task_type(task: Task) -> str:
 
 
 def task_to_dict(task: Task) -> dict:
+    from app.models.stat_template import StatTemplate
+    
+    template_code = None
+    if task.template_id:
+        template = task._sa_instance_state.session.query(StatTemplate).filter(StatTemplate.id == task.template_id).first()
+        if template:
+            template_code = template.template_code
+    
     return {
         "id": task.id,
         "task_code": task.task_code,
@@ -60,6 +68,7 @@ def task_to_dict(task: Task) -> dict:
         "creator_user_id": task.creator_user_id,
         "creator_agency_id": task.creator_agency_id,
         "template_id": task.template_id,
+        "template_code": template_code,
         "stat_start_time": task.stat_start_time,
         "stat_end_time": task.stat_end_time,
         "params_json": task.params_json,
@@ -165,7 +174,15 @@ def create_task(
     if not task_data.get("creator_agency_id"):
         task_data["creator_agency_id"] = creator_agency_id
 
-    task = Task(**task_data)
+    # 过滤掉 Task 模型不存在的字段，避免 ORM 构造失败
+    task_columns = {column.name for column in Task.__table__.columns}
+    task_model_data = {
+        key: value
+        for key, value in task_data.items()
+        if key in task_columns
+    }
+
+    task = Task(**task_model_data)
 
     db.add(task)
     db.commit()
@@ -227,14 +244,15 @@ def list_task_parties(db: Session, task_id: int) -> list[dict]:
     return [party_to_dict(party) for party in parties]
 
 
-def create_task_party(db: Session, task_id: int, party_create: TaskPartyCreate) -> dict:
+def create_task_party(db: Session, task_id: int, party_data: dict) -> dict:
     get_task_or_404(db, task_id)
 
+    agency_id = party_data.get("agency_id")
     exists = (
         db.query(TaskParty)
         .filter(
             TaskParty.task_id == task_id,
-            TaskParty.agency_id == party_create.agency_id,
+            TaskParty.agency_id == agency_id,
         )
         .first()
     )
@@ -243,7 +261,7 @@ def create_task_party(db: Session, task_id: int, party_create: TaskPartyCreate) 
 
     party = TaskParty(
         task_id=task_id,
-        **party_create.model_dump(),
+        **party_data,
     )
 
     db.add(party)

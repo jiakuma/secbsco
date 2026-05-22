@@ -121,9 +121,14 @@
               <span class="mono-text" style="color: #409eff;">Node_{{ row.node_id }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="party_role" label="授权角色" width="140">
+          <el-table-column prop="party_role" label="授权角色" width="200">
             <template #default="{ row }">
-              <el-tag :type="row.party_role === 'coordinator' ? 'danger' : 'success'" effect="plain">
+              <template v-if="row.party_role && row.party_role.includes(',')">
+                <el-tag v-for="role in row.party_role.split(',')" :key="role" :type="role === 'coordinator' ? 'danger' : 'success'" effect="plain" style="margin-right: 4px;">
+                  {{ getPartyRoleText(role) }}
+                </el-tag>
+              </template>
+              <el-tag v-else :type="row.party_role === 'coordinator' ? 'danger' : 'success'" effect="plain">
                 {{ getPartyRoleText(row.party_role) }}
               </el-tag>
             </template>
@@ -174,17 +179,17 @@
           </el-select>
         </el-form-item>
         <el-form-item label="参与节点" prop="node_id">
-          <el-select v-model="partyForm.node_id" filterable clearable style="width: 100%" :loading="resourceLoading">
+          <el-select v-model="partyForm.node_id" filterable clearable style="width: 100%" :loading="resourceLoading" @change="handleNodeChange">
             <el-option v-for="item in filteredNodeOptions" :key="item.id" :label="item.node_name || item.name || item.node_code || `节点${item.id}`" :value="item.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="数据资源" prop="dataset_id">
-          <el-select v-model="partyForm.dataset_id" filterable clearable style="width: 100%" :loading="resourceLoading">
-            <el-option v-for="item in filteredDatasetOptions" :key="item.id" :label="item.dataset_name || item.name || item.dataset_code || `数据资源${item.id}`" :value="item.id" />
+        <el-form-item label="数据资源">
+          <el-select v-model="partyForm.dataset_name" filterable clearable placeholder="请选择数据资源" style="width: 100%" :loading="resourceLoading">
+            <el-option v-for="item in filteredDatasetOptions" :key="item.dataset_id" :label="item.dataset_name" :value="item.dataset_name" />
           </el-select>
         </el-form-item>
         <el-form-item label="参与角色">
-          <el-select v-model="partyForm.party_role" style="width: 100%">
+          <el-select v-model="partyForm.party_roles" multiple collapse-tags collapse-tags-tooltip placeholder="请选择参与角色，可多选" style="width: 100%">
             <el-option v-for="item in partyRoleOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </el-form-item>
@@ -218,6 +223,7 @@ import { getChainRecordList } from '@/api/chainRecord'
 import { getAgencyList } from '@/api/agency'
 import { getNodeList } from '@/api/node'
 import { getDatasetList } from '@/api/dataset'
+import { getGroupDatasets } from '@/api/group'
 import {
   buildDefaultFieldMappingText, buildDefaultPartyRole, getAlgorithmTypeText,
   getFederatedModeText, getFlDatasetFieldRows, getFlProcessSteps,
@@ -245,7 +251,7 @@ const partyDialogVisible = ref(false)
 const creatingParty = ref(false)
 const partyFormRef = ref<FormInstance>()
 const fieldMappingText = ref(buildDefaultFieldMappingText(taskDetail.value))
-const partyForm = ref({ agency_id: null as number | null, node_id: null as number | null, dataset_id: null as number | null, party_role: buildDefaultPartyRole(taskDetail.value), field_mapping_json: {} })
+const partyForm = ref({ agency_id: null as number | null, node_id: null as number | null, dataset_name: null as string | null, party_roles: [] as string[], field_mapping_json: {} })
 
 const statisticPartyRoleOptions = [{ label: '数据提供方', value: 'data_provider' }, { label: '结果接收方', value: 'result_receiver' }, { label: '协调方', value: 'coordinator' }]
 const federatedPartyRoleOptions = [{ label: '训练方', value: 'training_client' }, { label: '协调方', value: 'coordinator' }, { label: '评估方', value: 'evaluator' }]
@@ -254,7 +260,6 @@ const partyRoleOptions = computed(() => (isFederatedLearningTask(taskDetail.valu
 const partyRules: FormRules = {
   agency_id: [{ required: true, message: '请选择参与机构', trigger: 'change' }],
   node_id: [{ required: true, message: '请选择参与节点', trigger: 'change' }],
-  dataset_id: [{ required: true, message: '请选择数据资源', trigger: 'change' }],
 }
 
 const resourceLoading = ref(false)
@@ -262,7 +267,14 @@ const agencyOptions = ref<any[]>([])
 const nodeOptions = ref<any[]>([])
 const datasetOptions = ref<any[]>([])
 const filteredNodeOptions = computed(() => (!partyForm.value.agency_id ? nodeOptions.value : nodeOptions.value.filter((item) => item.agency_id === partyForm.value.agency_id)))
-const filteredDatasetOptions = computed(() => (!partyForm.value.agency_id ? datasetOptions.value : datasetOptions.value.filter((item) => item.agency_id === partyForm.value.agency_id)))
+const filteredDatasetOptions = computed(() => {
+  if (!partyForm.value.agency_id) return datasetOptions.value
+  return datasetOptions.value.filter((item) => {
+    if (item.agency_id !== partyForm.value.agency_id) return false
+    if (partyForm.value.node_id && item.node_id && item.node_id !== partyForm.value.node_id) return false
+    return true
+  })
+})
 
 // 剪贴板复制工具
 async function copyText(text: string) {
@@ -335,22 +347,34 @@ async function recoverRunSuccessAfterRequestError(isFlTask: boolean) {
 
 async function openPartyDialog() {
   partyDialogVisible.value = true
-  partyForm.value = { agency_id: null, node_id: null, dataset_id: null, party_role: buildDefaultPartyRole(taskDetail.value), field_mapping_json: {} }
+  partyForm.value = { agency_id: null, node_id: null, dataset_name: null, party_roles: [], field_mapping_json: {} }
   fieldMappingText.value = buildDefaultFieldMappingText(taskDetail.value)
   await loadResourceOptions()
 }
 
-function handleAgencyChange() { partyForm.value.node_id = null; partyForm.value.dataset_id = null }
+function handleAgencyChange() { partyForm.value.node_id = null; partyForm.value.dataset_name = null }
+function handleNodeChange() { partyForm.value.dataset_name = null }
 
 async function handleCreateParty() {
   if (!partyFormRef.value) return
   await partyFormRef.value.validate(async (valid) => {
     if (!valid) return
-    if (!partyForm.value.agency_id || !partyForm.value.node_id || !partyForm.value.dataset_id) { ElMessage.warning('请选择所有必填项'); return }
+    if (!partyForm.value.agency_id || !partyForm.value.node_id) { ElMessage.warning('请选择参与机构和参与节点'); return }
+    if (!partyForm.value.party_roles || partyForm.value.party_roles.length === 0) { ElMessage.warning('请至少选择一个参与角色'); return }
+    
+    const hasDataProvider = partyForm.value.party_roles.includes('data_provider')
+    if (hasDataProvider && !partyForm.value.dataset_name) { ElMessage.warning('数据提供方必须选择数据资源'); return }
+    
     creatingParty.value = true
     try {
       let fm = {}; if (fieldMappingText.value.trim()) fm = JSON.parse(fieldMappingText.value);
-      await createTaskParty(taskId, { ...partyForm.value, field_mapping_json: fm })
+      await createTaskParty(taskId, { 
+        agency_id: partyForm.value.agency_id,
+        node_id: partyForm.value.node_id,
+        data_resource_name: partyForm.value.dataset_name,
+        party_role: partyForm.value.party_roles.join(','),
+        field_mapping_json: fm 
+      })
       ElMessage.success('节点挂载成功'); partyDialogVisible.value = false; await loadParties();
     } catch (error) { ElMessage.error('节点挂载失败，请检查配置') }
     finally { creatingParty.value = false }
@@ -438,8 +462,17 @@ function formatFramework(value: string | null | undefined) { return value === 'm
 async function loadResourceOptions() {
   resourceLoading.value = true
   try {
-    const [agencyRes, nodeRes, datasetRes] = await Promise.all([getAgencyList({ page: 1, page_size: 100 }), getNodeList({ page: 1, page_size: 100 }), getDatasetList({ page: 1, page_size: 100 })])
-    agencyOptions.value = normalizeList(unwrapResponse(agencyRes)); nodeOptions.value = normalizeList(unwrapResponse(nodeRes)); datasetOptions.value = normalizeList(unwrapResponse(datasetRes))
+    const [agencyRes, nodeRes] = await Promise.all([getAgencyList({ page: 1, page_size: 100 }), getNodeList({ page: 1, page_size: 100 })])
+    agencyOptions.value = normalizeList(unwrapResponse(agencyRes))
+    nodeOptions.value = normalizeList(unwrapResponse(nodeRes))
+    
+    if (taskDetail.value?.group_id) {
+      const datasetRes = await getGroupDatasets(taskDetail.value.group_id)
+      const data = unwrapResponse(datasetRes)
+      datasetOptions.value = Array.isArray(data) ? data : []
+    } else {
+      datasetOptions.value = []
+    }
   } catch (error) { ElMessage.error('基础资源池加载失败') } finally { resourceLoading.value = false }
 }
 

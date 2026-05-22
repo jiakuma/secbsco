@@ -52,7 +52,7 @@
 
       <!-- 统计卡片 -->
       <el-row :gutter="16" class="stat-row">
-        <el-col :span="6" v-for="stat in statCards" :key="stat.label">
+        <el-col :xs="12" :sm="8" :md="4" :lg="4" v-for="stat in statCards" :key="stat.label">
           <el-card class="stat-card" shadow="hover">
             <div class="stat-value">{{ stat.value }}</div>
             <div class="stat-label">{{ stat.label }}</div>
@@ -140,6 +140,56 @@
                   >
                     取消授权
                   </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+
+          <!-- 群数据 Tab -->
+          <el-tab-pane label="群数据" name="datasets">
+            <div class="tab-toolbar" v-if="canManage">
+              <el-button type="primary" size="small" @click="showAddDatasetDialog">授权数据集</el-button>
+            </div>
+            <el-table :data="datasetList" v-loading="datasetsLoading" border stripe>
+              <el-table-column prop="dataset_name" label="数据集名称" min-width="180" />
+              <el-table-column prop="dataset_code" label="数据集编码" width="180" />
+              <el-table-column prop="agency_name" label="所属机构" min-width="160" />
+              <el-table-column label="数据类型" width="100">
+                <template #default="{ row }">
+                  <el-tag size="small">{{ row.data_type || '-' }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="data_location" label="数据位置" min-width="200" show-overflow-tooltip />
+              <el-table-column v-if="canManage" label="操作" width="120" fixed="right">
+                <template #default="{ row }">
+                  <el-button type="danger" link size="small" @click="handleRemoveDataset(row)">取消授权</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-tab-pane>
+
+          <!-- 群模板 Tab -->
+          <el-tab-pane label="群模板" name="templates">
+            <div class="tab-toolbar" v-if="canManage">
+              <el-button type="primary" size="small" @click="showAddTemplateDialog">授权模板</el-button>
+            </div>
+            <el-table :data="templateList" v-loading="templatesLoading" border stripe>
+              <el-table-column prop="template_name" label="模板名称" min-width="180" />
+              <el-table-column prop="template_code" label="模板编码" width="180" />
+              <el-table-column prop="agency_name" label="所属机构" min-width="160" />
+              <el-table-column label="适用场景" width="140">
+                <template #default="{ row }">
+                  <el-tag size="small" type="info">{{ row.scenario || '-' }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="执行方式" width="100">
+                <template #default="{ row }">
+                  <el-tag size="small">{{ row.exec_mode === 'auto' ? '自动' : '手动' }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="canManage" label="操作" width="120" fixed="right">
+                <template #default="{ row }">
+                  <el-button type="danger" link size="small" @click="handleRemoveTemplate(row)">取消授权</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -289,6 +339,50 @@
         </template>
       </el-table>
     </el-dialog>
+
+    <!-- 授权数据集弹窗 -->
+    <el-dialog v-model="addDatasetDialogVisible" title="授权数据集" width="600px" :close-on-click-modal="false">
+      <el-table :data="availableDatasets" v-loading="availableDatasetsLoading" border stripe max-height="400">
+        <el-table-column prop="dataset_name" label="数据集名称" min-width="180" />
+        <el-table-column prop="dataset_code" label="数据集编码" width="160" />
+        <el-table-column prop="agency_name" label="所属机构" min-width="140" />
+        <el-table-column label="数据类型" width="100">
+          <template #default="{ row }">
+            <el-tag size="small">{{ row.data_type || '-' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="80" fixed="right">
+          <template #default="{ row }">
+            <el-button type="primary" link size="small" @click="handleAddDataset(row)">授权</el-button>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <div class="empty-nodes-hint">暂无可授权数据集，请先在数据资源管理中登记成员机构数据集</div>
+        </template>
+      </el-table>
+    </el-dialog>
+
+    <!-- 授权模板弹窗 -->
+    <el-dialog v-model="addTemplateDialogVisible" title="授权模板" width="600px" :close-on-click-modal="false">
+      <el-table :data="availableTemplates" v-loading="availableTemplatesLoading" border stripe max-height="400">
+        <el-table-column prop="template_name" label="模板名称" min-width="180" />
+        <el-table-column prop="template_code" label="模板编码" width="160" />
+        <el-table-column prop="agency_name" label="所属机构" min-width="140" />
+        <el-table-column label="适用场景" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" type="info">{{ row.scenario || '-' }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="80" fixed="right">
+          <template #default="{ row }">
+            <el-button type="primary" link size="small" @click="handleAddTemplate(row)">授权</el-button>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <div class="empty-nodes-hint">暂无可授权模板，请先在数据资源管理中登记任务模板</div>
+        </template>
+      </el-table>
+    </el-dialog>
   </div>
 </template>
 
@@ -301,6 +395,8 @@ import {
   getGroupMembers, addGroupMember, removeGroupMember,
   getGroupUsers, addGroupUser, updateGroupUserRole, removeGroupUser,
   getGroupNodes, getAvailableGroupNodes, addGroupNode, removeGroupNode,
+  getGroupDatasets, getAvailableGroupDatasets, addGroupDataset, removeGroupDataset,
+  getGroupTemplates, getAvailableGroupTemplates, addGroupTemplate, removeGroupTemplate,
   getGroupLifecycleLogs,
   type GroupDetail, type GroupMemberItem, type GroupUserItem,
   type GroupNodeItem, type AvailableNodeItem, type LifecycleLogItem,
@@ -364,11 +460,15 @@ const activeTab = ref('members')
 const memberList = ref<GroupMemberItem[]>([])
 const userList = ref<GroupUserItem[]>([])
 const nodeList = ref<GroupNodeItem[]>([])
+const datasetList = ref<any[]>([])
+const templateList = ref<any[]>([])
 const lifecycleList = ref<LifecycleLogItem[]>([])
 
 const membersLoading = ref(false)
 const usersLoading = ref(false)
 const nodesLoading = ref(false)
+const datasetsLoading = ref(false)
+const templatesLoading = ref(false)
 const lifecycleLoading = ref(false)
 
 const loadedTabs = ref<Set<string>>(new Set())
@@ -407,7 +507,8 @@ const statCards = computed(() => {
     { label: '成员机构', value: s.member_count || 0 },
     { label: '群组用户', value: s.user_count || 0 },
     { label: '授权节点', value: s.node_count || 0 },
-    { label: '统计任务', value: s.task_count || 0 },
+    { label: '授权数据', value: datasetList.value.length },
+    { label: '授权模板', value: templateList.value.length },
   ]
 })
 
@@ -486,11 +587,41 @@ async function loadLifecycle() {
   }
 }
 
+async function loadDatasets() {
+  if (loadedTabs.value.has('datasets')) return
+  datasetsLoading.value = true
+  try {
+    const raw = await getGroupDatasets(groupId)
+    datasetList.value = unwrapList(raw).items || []
+    loadedTabs.value.add('datasets')
+  } catch (err: any) {
+    ElMessage.error(getErrorMessage(err, '加载群数据失败'))
+  } finally {
+    datasetsLoading.value = false
+  }
+}
+
+async function loadTemplates() {
+  if (loadedTabs.value.has('templates')) return
+  templatesLoading.value = true
+  try {
+    const raw = await getGroupTemplates(groupId)
+    templateList.value = unwrapList(raw).items || []
+    loadedTabs.value.add('templates')
+  } catch (err: any) {
+    ElMessage.error(getErrorMessage(err, '加载群模板失败'))
+  } finally {
+    templatesLoading.value = false
+  }
+}
+
 function handleTabChange(tabName: string | number) {
   const tab = String(tabName)
   if (tab === 'members') loadMembers()
   else if (tab === 'users') loadUsers()
   else if (tab === 'nodes') loadNodes()
+  else if (tab === 'datasets') loadDatasets()
+  else if (tab === 'templates') loadTemplates()
   else if (tab === 'lifecycle') loadLifecycle()
 }
 
@@ -499,6 +630,8 @@ async function reloadTab(tab: string) {
   if (tab === 'members') { memberList.value = []; await loadMembers() }
   else if (tab === 'users') { userList.value = []; await loadUsers() }
   else if (tab === 'nodes') { nodeList.value = []; await loadNodes() }
+  else if (tab === 'datasets') { datasetList.value = []; await loadDatasets() }
+  else if (tab === 'templates') { templateList.value = []; await loadTemplates() }
   else if (tab === 'lifecycle') { lifecycleList.value = []; await loadLifecycle() }
 }
 
@@ -783,6 +916,100 @@ async function handleRemoveNode(row: GroupNodeItem) {
     ElMessage.success('节点授权已取消')
     await reloadTab('nodes')
     await loadDetail()
+  } catch (err: any) {
+    if (err !== 'cancel') ElMessage.error(getErrorMessage(err, '取消授权失败'))
+  }
+}
+
+// ============================================================
+// 群数据授权
+// ============================================================
+
+const addDatasetDialogVisible = ref(false)
+const availableDatasets = ref<any[]>([])
+const availableDatasetsLoading = ref(false)
+
+async function showAddDatasetDialog() {
+  addDatasetDialogVisible.value = true
+  availableDatasetsLoading.value = true
+  try {
+    const raw = await getAvailableGroupDatasets(groupId)
+    availableDatasets.value = unwrapList(raw).items || []
+  } catch (err: any) {
+    ElMessage.error(getErrorMessage(err, '加载可授权数据集失败'))
+  } finally {
+    availableDatasetsLoading.value = false
+  }
+}
+
+async function handleAddDataset(row: any) {
+  try {
+    await addGroupDataset(groupId, row.id)
+    ElMessage.success('数据集授权成功')
+    addDatasetDialogVisible.value = false
+    await reloadTab('datasets')
+  } catch (err: any) {
+    ElMessage.error(getErrorMessage(err, '授权失败'))
+  }
+}
+
+async function handleRemoveDataset(row: any) {
+  try {
+    await ElMessageBox.confirm(`确认取消数据集「${row.dataset_name}」的授权？`, '确认', {
+      confirmButtonText: '取消授权',
+      cancelButtonText: '返回',
+      type: 'warning',
+    })
+    await removeGroupDataset(groupId, row.dataset_id)
+    ElMessage.success('数据集授权已取消')
+    await reloadTab('datasets')
+  } catch (err: any) {
+    if (err !== 'cancel') ElMessage.error(getErrorMessage(err, '取消授权失败'))
+  }
+}
+
+// ============================================================
+// 群模板授权
+// ============================================================
+
+const addTemplateDialogVisible = ref(false)
+const availableTemplates = ref<any[]>([])
+const availableTemplatesLoading = ref(false)
+
+async function showAddTemplateDialog() {
+  addTemplateDialogVisible.value = true
+  availableTemplatesLoading.value = true
+  try {
+    const raw = await getAvailableGroupTemplates(groupId)
+    availableTemplates.value = unwrapList(raw).items || []
+  } catch (err: any) {
+    ElMessage.error(getErrorMessage(err, '加载可授权模板失败'))
+  } finally {
+    availableTemplatesLoading.value = false
+  }
+}
+
+async function handleAddTemplate(row: any) {
+  try {
+    await addGroupTemplate(groupId, row.id)
+    ElMessage.success('模板授权成功')
+    addTemplateDialogVisible.value = false
+    await reloadTab('templates')
+  } catch (err: any) {
+    ElMessage.error(getErrorMessage(err, '授权失败'))
+  }
+}
+
+async function handleRemoveTemplate(row: any) {
+  try {
+    await ElMessageBox.confirm(`确认取消模板「${row.template_name}」的授权？`, '确认', {
+      confirmButtonText: '取消授权',
+      cancelButtonText: '返回',
+      type: 'warning',
+    })
+    await removeGroupTemplate(groupId, row.template_id)
+    ElMessage.success('模板授权已取消')
+    await reloadTab('templates')
   } catch (err: any) {
     if (err !== 'cancel') ElMessage.error(getErrorMessage(err, '取消授权失败'))
   }

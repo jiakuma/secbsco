@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     SECRETFLOW_FL_BATCH_SIZE: int = 32
     SECRETFLOW_FL_LEARNING_RATE: float = 0.001
 
+    # Bio Task Runtime 配置（T2 时空轨迹预测任务）
+    BIO_TASK_RUNTIME_URL: str = "http://123.60.109.244:18190"
+    BIO_TASK_RUNTIME_TIMEOUT: int = 600
+
     @property
     def DATABASE_URL(self) -> str:
         return (

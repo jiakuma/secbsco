@@ -605,3 +605,480 @@ def reject_delete_group(
         if hasattr(e, "status_code"):
             raise
         return fail(message=str(e), code=500)
+
+
+# ============================================================
+# 群组数据集授权
+# ============================================================
+
+@router.get("/{group_id}/datasets")
+def list_group_datasets(
+    group_id: int,
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    """获取群组已授权数据集列表"""
+    try:
+        from app.models.group import GroupDataset
+        from app.models.dataset import Dataset
+        from app.services.access_control_service import check_group_access
+
+        check_group_access(db, current_user.id, group_id)
+
+        group_datasets = db.query(GroupDataset).filter(
+            GroupDataset.group_id == group_id,
+            GroupDataset.auth_status == "active",
+        ).all()
+
+        items = []
+        for gd in group_datasets:
+            dataset = db.query(Dataset).filter(Dataset.id == gd.dataset_id).first()
+            if dataset:
+                from app.models.agency import Agency
+                agency = db.query(Agency).filter(Agency.id == dataset.agency_id).first()
+                items.append({
+                    "id": gd.id,
+                    "dataset_id": dataset.id,
+                    "dataset_name": dataset.dataset_name,
+                    "dataset_code": dataset.dataset_code,
+                    "agency_id": dataset.agency_id,
+                    "agency_name": agency.agency_name if agency else None,
+                    "node_id": dataset.node_id,
+                    "data_type": dataset.data_type,
+                    "data_location": dataset.data_location,
+                    "authorized_at": str(gd.authorized_at) if gd.authorized_at else None,
+                })
+
+        return success(data=items)
+    except Exception as e:
+        if hasattr(e, "status_code"):
+            raise
+        return fail(message=str(e), code=500)
+
+
+@router.get("/{group_id}/available-datasets")
+def list_available_group_datasets(
+    group_id: int,
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    """获取可授权数据集列表"""
+    try:
+        from app.models.group import GroupMember, GroupDataset
+        from app.models.dataset import Dataset
+        from app.services.access_control_service import (
+            check_group_access,
+            is_platform_admin,
+            is_agency_admin,
+        )
+
+        check_group_access(db, current_user.id, group_id)
+
+        if not is_platform_admin(db, current_user.id) and not is_agency_admin(db, current_user.id):
+            return success(data=[])
+
+        member_agency_ids = db.query(GroupMember.agency_id).filter(
+            GroupMember.group_id == group_id,
+            GroupMember.join_status == "active",
+        ).all()
+        member_agency_id_list = [r[0] for r in member_agency_ids if r[0]]
+
+        if not member_agency_id_list:
+            return success(data=[])
+
+        authorized_dataset_ids = db.query(GroupDataset.dataset_id).filter(
+            GroupDataset.group_id == group_id,
+            GroupDataset.auth_status == "active",
+        ).all()
+        auth_ids = {r[0] for r in authorized_dataset_ids}
+
+        query = db.query(Dataset).filter(
+            Dataset.agency_id.in_(member_agency_id_list),
+            ~Dataset.id.in_(auth_ids),
+        )
+
+        if is_agency_admin(db, current_user.id) and not is_platform_admin(db, current_user.id):
+            user_agency_id = current_user.agency_id
+            if user_agency_id:
+                from app.models.agency import Agency
+                visible_ids = [user_agency_id]
+                def collect_descendants(parent_id: int):
+                    children = db.query(Agency.id).filter(
+                        Agency.parent_agency_id == parent_id,
+                        Agency.status == "active",
+                    ).all()
+                    for child in children:
+                        child_id = child[0]
+                        if child_id not in visible_ids:
+                            visible_ids.append(child_id)
+                            collect_descendants(child_id)
+                collect_descendants(user_agency_id)
+                query = query.filter(Dataset.agency_id.in_(visible_ids))
+
+        datasets = query.all()
+        items = []
+        for d in datasets:
+            from app.models.agency import Agency
+            agency = db.query(Agency).filter(Agency.id == d.agency_id).first()
+            items.append({
+                "id": d.id,
+                "dataset_name": d.dataset_name,
+                "dataset_code": d.dataset_code,
+                "agency_id": d.agency_id,
+                "agency_name": agency.agency_name if agency else None,
+                "data_type": d.data_type,
+            })
+
+        return success(data=items)
+    except Exception as e:
+        if hasattr(e, "status_code"):
+            raise
+        return fail(message=str(e), code=500)
+
+
+@router.post("/{group_id}/datasets")
+def add_group_dataset(
+    group_id: int,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    """授权数据集到群组"""
+    try:
+        from app.models.group import GroupDataset
+        from app.models.dataset import Dataset
+        from app.services.access_control_service import (
+            check_group_access,
+            is_platform_admin,
+            is_agency_admin,
+        )
+        from datetime import datetime
+
+        check_group_access(db, current_user.id, group_id)
+
+        if not is_platform_admin(db, current_user.id) and not is_agency_admin(db, current_user.id):
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+
+        dataset_id = payload.get("dataset_id")
+        if not dataset_id:
+            raise HTTPException(status_code=400, detail="缺少dataset_id")
+
+        dataset = db.query(Dataset).filter(Dataset.id == dataset_id).first()
+        if not dataset:
+            raise HTTPException(status_code=404, detail="数据集不存在")
+
+        existing = db.query(GroupDataset).filter(
+            GroupDataset.group_id == group_id,
+            GroupDataset.dataset_id == dataset_id,
+        ).first()
+
+        now = datetime.now()
+
+        if existing:
+            if existing.auth_status == "active":
+                raise HTTPException(status_code=400, detail="该数据集已授权给当前群组")
+            existing.auth_status = "active"
+            existing.authorized_by = current_user.id
+            existing.authorized_at = now
+            existing.revoked_at = None
+            existing.updated_at = now
+        else:
+            existing = GroupDataset(
+                group_id=group_id,
+                agency_id=dataset.agency_id,
+                dataset_id=dataset_id,
+                auth_status="active",
+                authorized_by=current_user.id,
+                authorized_at=now,
+            )
+            db.add(existing)
+
+        db.commit()
+        return success(data={"id": existing.id, "dataset_id": dataset_id})
+    except Exception as e:
+        if hasattr(e, "status_code"):
+            raise
+        return fail(message=str(e), code=500)
+
+
+@router.delete("/{group_id}/datasets/{dataset_id}")
+def remove_group_dataset(
+    group_id: int,
+    dataset_id: int,
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    """撤销数据集授权"""
+    try:
+        from app.models.group import GroupDataset
+        from app.services.access_control_service import (
+            check_group_access,
+            is_platform_admin,
+            is_agency_admin,
+        )
+        from datetime import datetime
+
+        check_group_access(db, current_user.id, group_id)
+
+        if not is_platform_admin(db, current_user.id) and not is_agency_admin(db, current_user.id):
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+
+        gd = db.query(GroupDataset).filter(
+            GroupDataset.group_id == group_id,
+            GroupDataset.dataset_id == dataset_id,
+        ).first()
+
+        if not gd:
+            raise HTTPException(status_code=404, detail="授权记录不存在")
+
+        now = datetime.now()
+        gd.auth_status = "revoked"
+        gd.revoked_at = now
+        gd.updated_at = now
+
+        db.commit()
+        return success(data={"id": gd.id})
+    except Exception as e:
+        if hasattr(e, "status_code"):
+            raise
+        return fail(message=str(e), code=500)
+
+
+# ============================================================
+# 群组任务模板授权
+# ============================================================
+
+@router.get("/{group_id}/templates")
+def list_group_templates(
+    group_id: int,
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    """获取群组已授权任务模板列表"""
+    try:
+        from app.models.group import GroupTaskTemplate
+        from app.models.stat_template import StatTemplate
+        from app.services.access_control_service import check_group_access
+
+        check_group_access(db, current_user.id, group_id)
+
+        group_templates = db.query(GroupTaskTemplate).filter(
+            GroupTaskTemplate.group_id == group_id,
+            GroupTaskTemplate.auth_status == "active",
+        ).all()
+
+        items = []
+        for gt in group_templates:
+            template = db.query(StatTemplate).filter(StatTemplate.id == gt.template_id).first()
+            if template:
+                from app.models.agency import Agency
+                agency = db.query(Agency).filter(Agency.id == template.agency_id).first() if template.agency_id else None
+                items.append({
+                    "id": gt.id,
+                    "template_id": template.id,
+                    "template_name": template.template_name,
+                    "template_code": template.template_code,
+                    "agency_id": template.agency_id,
+                    "agency_name": agency.agency_name if agency else None,
+                    "scenario": template.scenario,
+                    "exec_mode": template.exec_mode,
+                    "output_type": template.output_type,
+                    "authorized_at": str(gt.authorized_at) if gt.authorized_at else None,
+                })
+
+        return success(data=items)
+    except Exception as e:
+        if hasattr(e, "status_code"):
+            raise
+        return fail(message=str(e), code=500)
+
+
+@router.get("/{group_id}/available-templates")
+def list_available_group_templates(
+    group_id: int,
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    """获取可授权任务模板列表"""
+    try:
+        from app.models.group import GroupMember, GroupTaskTemplate
+        from app.models.stat_template import StatTemplate
+        from app.services.access_control_service import (
+            check_group_access,
+            is_platform_admin,
+            is_agency_admin,
+        )
+
+        check_group_access(db, current_user.id, group_id)
+
+        if not is_platform_admin(db, current_user.id) and not is_agency_admin(db, current_user.id):
+            return success(data=[])
+
+        member_agency_ids = db.query(GroupMember.agency_id).filter(
+            GroupMember.group_id == group_id,
+            GroupMember.join_status == "active",
+        ).all()
+        member_agency_id_list = [r[0] for r in member_agency_ids if r[0]]
+
+        authorized_template_ids = db.query(GroupTaskTemplate.template_id).filter(
+            GroupTaskTemplate.group_id == group_id,
+            GroupTaskTemplate.auth_status == "active",
+        ).all()
+        auth_ids = {r[0] for r in authorized_template_ids}
+
+        query = db.query(StatTemplate).filter(~StatTemplate.id.in_(auth_ids))
+
+        if member_agency_id_list:
+            query = query.filter(
+                (StatTemplate.agency_id.in_(member_agency_id_list)) | (StatTemplate.agency_id.is_(None))
+            )
+
+        if is_agency_admin(db, current_user.id) and not is_platform_admin(db, current_user.id):
+            user_agency_id = current_user.agency_id
+            if user_agency_id:
+                from app.models.agency import Agency
+                visible_ids = [user_agency_id]
+                def collect_descendants(parent_id: int):
+                    children = db.query(Agency.id).filter(
+                        Agency.parent_agency_id == parent_id,
+                        Agency.status == "active",
+                    ).all()
+                    for child in children:
+                        child_id = child[0]
+                        if child_id not in visible_ids:
+                            visible_ids.append(child_id)
+                            collect_descendants(child_id)
+                collect_descendants(user_agency_id)
+                query = query.filter(
+                    (StatTemplate.agency_id.in_(visible_ids)) | (StatTemplate.agency_id.is_(None))
+                )
+
+        templates = query.all()
+        items = []
+        for t in templates:
+            from app.models.agency import Agency
+            agency = db.query(Agency).filter(Agency.id == t.agency_id).first() if t.agency_id else None
+            items.append({
+                "id": t.id,
+                "template_name": t.template_name,
+                "template_code": t.template_code,
+                "agency_id": t.agency_id,
+                "agency_name": agency.agency_name if agency else None,
+                "scenario": t.scenario,
+            })
+
+        return success(data=items)
+    except Exception as e:
+        if hasattr(e, "status_code"):
+            raise
+        return fail(message=str(e), code=500)
+
+
+@router.post("/{group_id}/templates")
+def add_group_template(
+    group_id: int,
+    payload: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    """授权任务模板到群组"""
+    try:
+        from app.models.group import GroupTaskTemplate
+        from app.models.stat_template import StatTemplate
+        from app.services.access_control_service import (
+            check_group_access,
+            is_platform_admin,
+            is_agency_admin,
+        )
+        from datetime import datetime
+
+        check_group_access(db, current_user.id, group_id)
+
+        if not is_platform_admin(db, current_user.id) and not is_agency_admin(db, current_user.id):
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+
+        template_id = payload.get("template_id")
+        if not template_id:
+            raise HTTPException(status_code=400, detail="缺少template_id")
+
+        template = db.query(StatTemplate).filter(StatTemplate.id == template_id).first()
+        if not template:
+            raise HTTPException(status_code=404, detail="模板不存在")
+
+        existing = db.query(GroupTaskTemplate).filter(
+            GroupTaskTemplate.group_id == group_id,
+            GroupTaskTemplate.template_id == template_id,
+        ).first()
+
+        now = datetime.now()
+
+        if existing:
+            if existing.auth_status == "active":
+                raise HTTPException(status_code=400, detail="该模板已授权给当前群组")
+            existing.auth_status = "active"
+            existing.authorized_by = current_user.id
+            existing.authorized_at = now
+            existing.revoked_at = None
+            existing.updated_at = now
+        else:
+            existing = GroupTaskTemplate(
+                group_id=group_id,
+                agency_id=template.agency_id,
+                template_id=template_id,
+                auth_status="active",
+                authorized_by=current_user.id,
+                authorized_at=now,
+            )
+            db.add(existing)
+
+        db.commit()
+        return success(data={"id": existing.id, "template_id": template_id})
+    except Exception as e:
+        if hasattr(e, "status_code"):
+            raise
+        return fail(message=str(e), code=500)
+
+
+@router.delete("/{group_id}/templates/{template_id}")
+def remove_group_template(
+    group_id: int,
+    template_id: int,
+    db: Session = Depends(get_db),
+    current_user: SysUser = Depends(get_current_user),
+):
+    """撤销任务模板授权"""
+    try:
+        from app.models.group import GroupTaskTemplate
+        from app.services.access_control_service import (
+            check_group_access,
+            is_platform_admin,
+            is_agency_admin,
+        )
+        from datetime import datetime
+
+        check_group_access(db, current_user.id, group_id)
+
+        if not is_platform_admin(db, current_user.id) and not is_agency_admin(db, current_user.id):
+            raise HTTPException(status_code=403, detail="需要管理员权限")
+
+        gt = db.query(GroupTaskTemplate).filter(
+            GroupTaskTemplate.group_id == group_id,
+            GroupTaskTemplate.template_id == template_id,
+        ).first()
+
+        if not gt:
+            raise HTTPException(status_code=404, detail="授权记录不存在")
+
+        now = datetime.now()
+        gt.auth_status = "revoked"
+        gt.revoked_at = now
+        gt.updated_at = now
+
+        db.commit()
+        return success(data={"id": gt.id})
+    except Exception as e:
+        if hasattr(e, "status_code"):
+            raise
+        return fail(message=str(e), code=500)

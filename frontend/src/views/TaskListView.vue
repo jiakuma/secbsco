@@ -8,7 +8,7 @@
 
       <div class="header-actions">
         <el-button :icon="Refresh" @click="loadTasks">刷新态势</el-button>
-        <el-button type="primary" :icon="Plus" @click="openCreateDialog">新建任务</el-button>
+        <el-button type="primary" :icon="Plus" @click="openCreateDialog">创建任务</el-button>
       </div>
     </header>
 
@@ -56,12 +56,6 @@
             </el-select>
           </el-form-item>
 
-          <el-form-item label="任务类型">
-            <el-select v-model="queryForm.task_type" placeholder="全部类型" clearable style="width: 140px">
-              <el-option v-for="item in TASK_TYPE_OPTIONS" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-          </el-form-item>
-
           <el-form-item label="任务场景">
             <el-select v-model="queryForm.scenario_code" placeholder="全部场景" clearable style="width: 240px">
               <el-option v-for="item in TASK_SCENARIO_OPTIONS" :key="item.value" :label="item.label" :value="item.value" />
@@ -90,14 +84,6 @@
           </el-table-column>
 
           <el-table-column prop="task_name" label="任务名称" min-width="200" show-overflow-tooltip />
-
-          <el-table-column label="任务类型" width="140" align="center">
-            <template #default="{ row }">
-              <el-tag :type="getTaskTypeTagType(row)" effect="plain">
-                {{ getTaskTypeText(row) }}
-              </el-tag>
-            </template>
-          </el-table-column>
 
           <el-table-column label="任务场景" min-width="200" show-overflow-tooltip>
             <template #default="{ row }">
@@ -155,7 +141,7 @@
       </el-card>
     </main>
 
-    <el-dialog v-model="createDialogVisible" title="构建协同计算任务" width="680px" destroy-on-close class="custom-dialog">
+    <el-dialog v-model="createDialogVisible" title="创建任务" width="680px" destroy-on-close class="custom-dialog">
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="120px" class="tech-form">
         <el-form-item label="所属群组" prop="group_id">
           <el-select v-model="createForm.group_id" placeholder="请选择群组" filterable disabled style="width: 100%" :loading="groupsLoading">
@@ -177,27 +163,12 @@
           <el-input v-model="createForm.task_name" placeholder="例如 流感样病例联合统计任务" />
         </el-form-item>
 
-        <el-form-item label="任务类型" prop="task_type">
-          <el-select v-model="createForm.task_type" placeholder="请选择任务类型" style="width: 100%" @change="handleTaskTypeChange">
-            <el-option v-for="item in TASK_TYPE_OPTIONS" :key="item.value" :label="item.label" :value="item.value" />
-          </el-select>
-          <div class="form-tip">
-            <el-icon><InfoFilled /></el-icon> 已接入 Alice 18181 SecretFlow 联邦训练服务；支持真实联邦训练及结果链上存证。
-          </div>
-        </el-form-item>
-
-        <el-form-item v-if="createForm.task_type === 'federated_learning'" label="任务场景" prop="scenario_code">
-          <el-select v-model="createForm.scenario_code" placeholder="请选择任务场景" style="width: 100%">
-            <el-option v-for="item in TASK_SCENARIO_OPTIONS" :key="item.value" :label="item.label" :value="item.value" />
-          </el-select>
-          <div class="form-tip">
-            <el-icon><Warning /></el-icon> 基于脱敏个案数据开展横向联邦学习，包含隐私求交溯源配置。
-          </div>
-        </el-form-item>
-
-        <el-form-item v-if="createForm.task_type === 'statistic'" label="统计模板" prop="template_id">
-          <el-select v-model="createForm.template_id" placeholder="请选择统计模板" filterable clearable style="width: 100%" :loading="templateLoading">
-            <el-option v-for="item in templateOptions" :key="item.id" :label="item.template_name || item.name || item.template_code || `模板${item.id}`" :value="item.id" />
+        <el-form-item label="任务模板" prop="template_id">
+          <el-select v-model="createForm.template_id" placeholder="请选择任务模板" filterable style="width: 100%" :loading="templateLoading">
+            <el-option v-for="item in templateOptions" :key="item.template_id" :label="item.template_name" :value="item.template_id">
+              <span>{{ item.template_name }}</span>
+              <span style="color: #999; margin-left: 8px; font-size: 12px;">{{ item.scenario || '' }}</span>
+            </el-option>
           </el-select>
         </el-form-item>
 
@@ -205,27 +176,6 @@
           <el-select v-model="createForm.creator_agency_id" placeholder="请选择创建机构" filterable clearable style="width: 100%" :loading="agencyLoading">
             <el-option v-for="item in agencyOptions" :key="item.id" :label="item.agency_name || item.name || item.agency_code || `机构${item.id}`" :value="item.id" />
           </el-select>
-        </el-form-item>
-
-        <el-form-item v-if="createForm.task_type === 'statistic'" label="统计时间范围">
-          <el-date-picker v-model="statRange" type="datetimerange" start-placeholder="开始时间" end-placeholder="结束时间" value-format="YYYY-MM-DD HH:mm:ss" style="width: 100%" />
-        </el-form-item>
-
-        <el-form-item v-if="createForm.task_type === 'federated_learning'" label="计算引擎配置">
-          <div class="fl-terminal-box">
-            <div class="terminal-header">
-              <span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span>
-              <span class="terminal-title">bash - SecretFlow_Config</span>
-            </div>
-            <div class="terminal-body">
-              <div><span class="keyword">Federated_Mode:</span> Horizontal Learning</div>
-              <div><span class="keyword">Framework:</span> SecretFlow Core</div>
-              <div><span class="keyword">Model_Type:</span> FLModel + Torch MLP Classifier</div>
-              <div><span class="keyword">Agg_Strategy:</span> fed_avg_w</div>
-              <div><span class="keyword">Agg_Method:</span> SparsePlainAggregator (Validation)</div>
-              <div><span class="keyword">Data_Boundary:</span> Strictly Local (Returns only metrics & hashes)</div>
-            </div>
-          </div>
         </el-form-item>
 
         <el-form-item label="任务描述">
@@ -248,7 +198,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { getAgencyList } from '@/api/agency'
 import { getStatTemplateList } from '@/api/statTemplate'
-import { getVisibleGroupsForTask, type VisibleGroupForTask } from '@/api/group'
+import { getVisibleGroupsForTask, getGroupTemplates, type VisibleGroupForTask } from '@/api/group'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 // 引入所需的图标
@@ -339,11 +289,20 @@ async function loadAgencyOptions() {
 }
 
 async function loadTemplateOptions() {
+  if (!queryForm.group_id) {
+    templateOptions.value = []
+    return
+  }
   templateLoading.value = true
   try {
-    const res = await getStatTemplateList({ page: 1, page_size: 100 })
-    templateOptions.value = normalizeList(unwrapResponse(res)).list
-  } catch (error) { ElMessage.error('统计模板列表加载失败') } finally { templateLoading.value = false }
+    const res = await getGroupTemplates(queryForm.group_id)
+    const data = unwrapResponse(res)
+    templateOptions.value = Array.isArray(data) ? data : []
+    console.log('已授权模板:', templateOptions.value)
+  } catch (error) {
+    console.error('模板加载失败:', error)
+    ElMessage.error('任务模板列表加载失败')
+  } finally { templateLoading.value = false }
 }
 
 async function loadTasks() {
@@ -391,7 +350,7 @@ function handleGroupChange() {
 
 function resetQuery() {
   queryForm.page = 1; queryForm.keyword = ''; queryForm.status = '';
-  queryForm.task_type = ''; queryForm.scenario_code = '';
+  queryForm.scenario_code = '';
   loadTasks()
 }
 
@@ -401,15 +360,12 @@ async function openCreateDialog() {
     return
   }
   createDialogVisible.value = true
-  createForm.task_code = `FLU_TASK_${Date.now()}`
+  createForm.task_code = `TASK_${Date.now()}`
   createForm.task_name = ''
-  createForm.task_type = 'statistic'
-  createForm.scenario_code = 'infectious_spatiotemporal_prediction'
   createForm.template_id = null
   createForm.creator_agency_id = null
   createForm.description = ''
   createForm.group_id = queryForm.group_id
-  statRange.value = []
   await Promise.all([loadAgencyOptions(), loadTemplateOptions(), loadVisibleGroups()])
 }
 
@@ -448,27 +404,25 @@ async function handleCreate() {
   await createFormRef.value.validate(async (valid) => {
     if (!valid) return
     if (!createForm.group_id) { ElMessage.warning('请选择所属群组'); return }
-    if (createForm.task_type === 'statistic' && !createForm.template_id) { ElMessage.warning('请选择统计模板'); return }
-    if (createForm.task_type === 'federated_learning' && !createForm.scenario_code) { ElMessage.warning('请选择联邦学习任务场景'); return }
+    if (!createForm.template_id) { ElMessage.warning('请选择任务模板'); return }
     if (!createForm.creator_agency_id) { ElMessage.warning('请选择创建机构'); return }
 
     creating.value = true
     try {
-      const isFederated = createForm.task_type === 'federated_learning'
       const payload: CreateTaskPayload = {
-        task_code: createForm.task_code, task_name: createForm.task_name,
-        template_id: isFederated ? null : createForm.template_id, creator_agency_id: createForm.creator_agency_id,
+        task_code: createForm.task_code,
+        task_name: createForm.task_name,
+        template_id: createForm.template_id,
+        creator_agency_id: createForm.creator_agency_id,
         description: createForm.description || undefined,
-        stat_start_time: isFederated ? undefined : statRange.value?.[0] || undefined,
-        stat_end_time: isFederated ? undefined : statRange.value?.[1] || undefined,
-        params_json: isFederated ? buildRealFederatedLearningParamsJson(createForm.scenario_code) : buildTaskParamsJson(createForm.task_type, undefined),
         group_id: createForm.group_id,
+        task_type: 'template_task',
       }
       await createTask(payload)
-      ElMessage.success('任务初始化调度成功')
+      ElMessage.success('任务创建成功')
       createDialogVisible.value = false
       await loadTasks()
-    } catch (error) { ElMessage.error('调度失败，请检查参数') } finally { creating.value = false }
+    } catch (error) { ElMessage.error('创建失败，请检查参数') } finally { creating.value = false }
   })
 }
 

@@ -221,12 +221,27 @@ def delete_stat_template(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    """删除任务模板"""
+    """删除任务模板（物理删除，清理相关引用）"""
     template = db.query(StatTemplate).filter(StatTemplate.id == template_id).first()
     if not template:
         raise HTTPException(status_code=404, detail="模板不存在")
     
     _check_template_access(db, current_user, template, require_write=True)
+    
+    protected_codes = [
+        "T1_JOINT_CASE_STAT_TEMPLATE",
+        "T2_SPATIOTEMPORAL_TEMPLATE",
+        "T3_KEY_POPULATION_RISK_TEMPLATE",
+    ]
+    if template.template_code in protected_codes:
+        raise HTTPException(status_code=403, detail="该模板为系统核心模板，不允许删除")
+    
+    from app.models.group import GroupTaskTemplate
+    from app.models.task import Task
+    
+    db.query(GroupTaskTemplate).filter(GroupTaskTemplate.template_id == template_id).delete()
+    
+    db.query(Task).filter(Task.template_id == template_id).update({Task.template_id: None})
     
     db.delete(template)
     db.commit()

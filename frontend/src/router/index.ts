@@ -44,7 +44,7 @@ const router = createRouter({
           name: 'TaskList',
           component: () => import('@/views/TaskListView.vue'),
           meta: {
-            title: '联合统计任务',
+            title: '任务管理',
           },
         },
         {
