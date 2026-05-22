@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="task-detail-page">
     <header class="page-header">
       <div class="title-area">
@@ -154,23 +154,7 @@
           </el-table-column>
         </el-table>
       </el-card>
-
-      <h3 class="section-title">执行与结果入口</h3>
-      <el-card class="section-card" shadow="never">
-        <div class="dispatch-entry">
-          <div>
-            <div class="dispatch-title">当前页面仅展示任务配置与参与方拓扑</div>
-            <div class="dispatch-desc">
-              点击右上角“下发联邦计算指令”后，将进入结果页面；结果页面会先展示联邦训练过程动画，训练结束后再展示训练指标、结果哈希和链上存证信息。
-            </div>
-          </div>
-          <el-button type="success" :icon="VideoPlay" @click="handleRun">
-            执行任务
-          </el-button>
-        </div>
-      </el-card>
     </main>
-
     <el-dialog v-model="partyDialogVisible" :title="isFederatedLearningTask(taskDetail) ? '新增训练节点' : '新增协同参与方'" width="680px" destroy-on-close>
       <el-form ref="partyFormRef" :model="partyForm" :rules="partyRules" label-width="120px">
         <el-form-item label="参与机构" prop="agency_id">

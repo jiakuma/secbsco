@@ -160,11 +160,7 @@
       </template>
 
       <el-card v-else-if="!running" class="section-card" shadow="never">
-        <el-empty description="暂无结果。点击下方按钮可下发计算指令并展示训练过程。">
-          <el-button type="success" :icon="VideoPlay" @click="handleRun">
-            {{ isFederatedLearningTask(taskDetail) ? '下发联邦计算指令' : '下发协同统计指令' }}
-          </el-button>
-        </el-empty>
+        <el-empty description="暂无结果。请在任务详情页点击执行任务按钮。" />
       </el-card>
     </main>
     </template>
@@ -315,26 +311,23 @@ async function handleRun() {
     return
   }
 
+  // 清空旧结果，避免误导
+  taskResult.value = null
+  chainAnchorResult.value = null
+  running.value = true
+  runStage.value = 'running'
+
+  // 确保动画至少显示 5 秒
+  const minAnimationTime = 5000
+  const startTime = Date.now()
+
   try {
-    await ElMessageBox.confirm('确认下发联邦计算指令并启动训练过程吗？', '下发确认', {
-      type: 'warning',
-      confirmButtonText: '开始执行',
-      cancelButtonText: '取消',
-    })
-
-    running.value = true
-    runStage.value = 'running'
-    taskResult.value = null
-    chainAnchorResult.value = null
-
     const data = unwrapResponse(await runTask(taskId))
     if (data?.result) taskResult.value = data.result
     await refreshAll()
     runStage.value = 'success'
     ElMessage.success('计算完成，结果已生成')
   } catch (error: any) {
-    if (error === 'cancel') return
-
     if (isRequestTimeoutOrNetworkError(error)) {
       ElMessage.warning('训练请求仍在后台执行，正在自动监听结果...')
       if (await recoverRunSuccessAfterRequestError()) return
@@ -342,7 +335,16 @@ async function handleRun() {
 
     runStage.value = 'failed'
     ElMessage.error('计算执行失败，请检查底层服务日志')
+    await loadDetail()
   } finally {
+    // 计算还需要等待多久，确保动画至少显示 5 秒
+    const elapsed = Date.now() - startTime
+    const remainingTime = Math.max(0, minAnimationTime - elapsed)
+    
+    if (remainingTime > 0) {
+      await new Promise(resolve => setTimeout(resolve, remainingTime))
+    }
+    
     running.value = false
   }
 }
