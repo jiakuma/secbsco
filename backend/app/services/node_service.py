@@ -603,9 +603,6 @@ class NodeService:
 
         node.updated_at = datetime.now()
         db.flush()
-        
-        # 判断是否激活成功
-        is_activated = node.status == "active" and node.activation_status == "activated"
 
         write_operate_log(
             db=db,
@@ -616,8 +613,6 @@ class NodeService:
             resource_id=node.id,
             agency_id=node.agency_id,
             request=request,
-            result_status="success" if is_activated else "failed",
-            result_message=node.activation_message,
         )
         anchor_resource_operation(
             db,
@@ -631,16 +626,7 @@ class NodeService:
         )
         db.commit()
         db.refresh(node)
-        
-        node_data = NodeService.build_node_info(node, db)
-        
-        # 返回包含业务状态的完整结构
-        return {
-            "success": is_activated,
-            "code": 0 if is_activated else 1,
-            "message": node.activation_message or ("节点激活成功" if is_activated else "节点激活失败"),
-            "data": node_data,
-        }
+        return NodeService.build_node_info(node, db)
 
     @staticmethod
     def deactivate_node(db: Session, node: Node, current_user: SysUser, request: Request | None = None) -> dict:

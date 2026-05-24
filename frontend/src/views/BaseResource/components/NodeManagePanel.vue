@@ -158,37 +158,7 @@ function canActivate(row:any){ return ['registered','failed','offline','disabled
 function canDeactivate(row:any){ return ['active','checking'].includes(row.status) }
 
 async function handleCheck(row:any){ try{ await checkNode(row.id); ElMessage.success('检测完成'); await loadList() }catch(e:any){ ElMessage.error(e?.response?.data?.detail || '检测失败') } }
-async function handleActivate(row: any) {
-  await ElMessageBox.confirm(`确认激活节点「${row.node_name}」？`, '激活确认', { type: 'warning' })
-  
-  try {
-    const res = await activateNode(row.id)
-    const payload = res?.data || res
-    const nodeData = payload?.data || payload
-    const activationStatus = nodeData?.activation_status
-    const nodeStatus = nodeData?.status
-    
-    const isActivated = 
-      (payload?.success === true || payload?.code === 0) &&
-      (activationStatus === 'activated' || nodeStatus === 'active')
-    
-    if (isActivated) {
-      ElMessage.success('节点激活成功')
-    } else {
-      const msg = 
-        payload?.message ||
-        nodeData?.activation_message ||
-        '节点激活失败，请检查 Agent 地址和服务状态'
-      ElMessage.error(msg)
-    }
-    
-    await loadList()
-  } catch (e: any) {
-    const detail = e?.response?.data?.detail || e?.response?.data?.message || '激活失败'
-    ElMessage.error(detail)
-    await loadList()
-  }
-}
+async function handleActivate(row:any){ await ElMessageBox.confirm(`确认激活节点「${row.node_name}」？`,'激活确认',{type:'warning'}); try{ await activateNode(row.id); ElMessage.success('已激活'); await loadList() }catch(e:any){ ElMessage.error(e?.response?.data?.detail || '激活失败') } }
 async function handleDeactivate(row:any){ await ElMessageBox.confirm(`确认停用节点「${row.node_name}」？`,'停用确认',{type:'warning'}); try{ await deactivateNode(row.id); ElMessage.success('已停用'); await loadList() }catch(e:any){ ElMessage.error(e?.response?.data?.detail || '停用失败') } }
 async function handleDelete(row:any){
   await ElMessageBox.confirm(`确认物理删除节点「${row.node_name}」？该节点的群组授权关系将一并删除。`,'删除确认',{type:'warning'})

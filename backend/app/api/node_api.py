@@ -193,11 +193,7 @@ def activate_node(
     if not node:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="节点不存在")
-    
-    result = NodeService.activate_node(db=db, node=node, current_user=current_user, request=request)
-    
-    # 直接返回service层的完整结果，不使用success()包装
-    return result
+    return success(NodeService.activate_node(db=db, node=node, current_user=current_user, request=request))
 
 
 @router.post("/{node_id}/deactivate")

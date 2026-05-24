@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     BIO_TASK_RUNTIME_URL: str = "http://123.60.109.244:18190"
     BIO_TASK_RUNTIME_TIMEOUT: int = 600
 
+    # Alice Node Agent 配置（19090，用于自动启动 bio-task-runtime）
+    ALICE_NODE_AGENT_URL: str = "http://123.60.109.244:19090"
+    ALICE_NODE_AGENT_TIMEOUT: int = 30
+
     @property
     def DATABASE_URL(self) -> str:
         return (

@@ -488,6 +488,59 @@ def _run_secretflow_federated_learning_task(db: Session, task) -> dict:
         raise
 
 
+def _check_runtime_health(runtime_url: str, timeout: int = 5) -> bool:
+    import requests
+    try:
+        resp = requests.get(f"{runtime_url}/health", timeout=timeout)
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
+def _start_runtime_via_agent(agent_url: str, timeout: int = 30) -> dict:
+    import requests
+    try:
+        resp = requests.post(
+            f"{agent_url}/services/start",
+            json={"service_code": "bio_task_runtime"},
+            timeout=timeout,
+        )
+        return resp.json() if resp.status_code == 200 else {"success": False, "message": f"HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+def _ensure_bio_task_runtime_ready(agent_url: str | None = None) -> None:
+    import time
+    from app.core.config import settings
+
+    runtime_url = settings.BIO_TASK_RUNTIME_URL
+    agent_url_to_use = agent_url or settings.ALICE_NODE_AGENT_URL
+
+    if _check_runtime_health(runtime_url):
+        return
+
+    result = _start_runtime_via_agent(agent_url_to_use, settings.ALICE_NODE_AGENT_TIMEOUT)
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=503,
+            detail=f"启动 bio-task-runtime 失败：{result.get('message', '未知错误')}"
+        )
+
+    time.sleep(3)
+
+    for _ in range(5):
+        if _check_runtime_health(runtime_url):
+            return
+        time.sleep(2)
+
+    raise HTTPException(
+        status_code=503,
+        detail="bio-task-runtime 启动超时，请检查 Alice 节点服务状态"
+    )
+
+
 def _run_bio_task_runtime(db: Session, task, template) -> dict:
     """
     第九阶段：调用 bio-task-runtime 18190 执行 T2 任务。
@@ -499,7 +552,7 @@ def _run_bio_task_runtime(db: Session, task, template) -> dict:
     from app.models.dataset import Dataset
     from app.core.config import settings
     
-    # 1. 查询参与方
+    # 0. 确保 bio-task-runtime 服务可用
     parties = (
         db.query(TaskParty)
         .filter(TaskParty.task_id == task.id)
@@ -507,6 +560,17 @@ def _run_bio_task_runtime(db: Session, task, template) -> dict:
         .all()
     )
     
+    agent_url = None
+    for party in parties:
+        if party.node_id:
+            node = db.query(Node).filter(Node.id == party.node_id).first()
+            if node and node.agent_url:
+                agent_url = node.agent_url
+                break
+    
+    _ensure_bio_task_runtime_ready(agent_url)
+    
+    # 1. 查询参与方（已在上面查询）
     if not parties:
         raise HTTPException(status_code=400, detail="任务参与方为空，无法执行任务")
     
