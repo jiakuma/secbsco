@@ -65,7 +65,7 @@ export function checkNode(nodeId: number) {
 }
 
 export function activateNode(nodeId: number) {
-  return request.post(`/api/nodes/${nodeId}/activate`)
+  return request.post(`/api/nodes/${nodeId}/activate`, {}, { timeout: 30000 })
 }
 
 export function deactivateNode(nodeId: number) {
