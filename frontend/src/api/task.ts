@@ -48,6 +48,10 @@ export function updateTask(taskId: number | string, data: Partial<CreateTaskPayl
   return request.put(`/api/tasks/${taskId}`, data)
 }
 
+export function deleteTask(taskId: number | string) {
+  return request.delete(`/api/tasks/${taskId}`)
+}
+
 export function updateTaskStatus(taskId: number | string, status: string) {
   return request.put(`/api/tasks/${taskId}/status`, { status })
 }

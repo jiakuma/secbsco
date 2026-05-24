@@ -51,7 +51,6 @@
         </el-table-column>
         <el-table-column prop="endpoint" label="访问地址" min-width="220" show-overflow-tooltip />
         <el-table-column prop="status" label="状态" width="100" align="center"><template #default="{ row }"><el-tag :type="statusTagType(row.status)" size="small">{{ statusText(row.status) }}</el-tag></template></el-table-column>
-        <el-table-column prop="activation_status" label="激活状态" width="100" align="center"><template #default="{ row }"><el-tag :type="activationTagType(row.activation_status)" size="small">{{ activationStatusText(row.activation_status) }}</el-tag></template></el-table-column>
         <el-table-column prop="last_check_at" label="最近检测" min-width="160" show-overflow-tooltip><template #default="{ row }">{{ row.last_check_at || '-' }}</template></el-table-column>
         <el-table-column label="操作" width="230" fixed="right">
           <template #default="{ row }">
@@ -120,7 +119,6 @@
         </el-descriptions-item>
         <el-descriptions-item label="访问地址">{{ detail.endpoint || '-' }}</el-descriptions-item>
         <el-descriptions-item label="节点状态">{{ statusText(detail.status) }}</el-descriptions-item>
-        <el-descriptions-item label="激活状态">{{ activationStatusText(detail.activation_status) }}</el-descriptions-item>
         <el-descriptions-item label="Agent地址">{{ detail.agent_url || '-' }}</el-descriptions-item>
         <el-descriptions-item label="最近检测">{{ detail.last_check_at || '-' }}</el-descriptions-item>
         <el-descriptions-item label="激活说明" :span="2">{{ detail.activation_message || '-' }}</el-descriptions-item>

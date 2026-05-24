@@ -101,20 +101,9 @@
 
           <el-table-column prop="created_at" label="创建时间" width="170" />
 
-          <el-table-column label="操作指令" width="260" fixed="right">
+          <el-table-column label="操作指令" width="240" fixed="right">
             <template #default="{ row }">
               <el-button link type="primary" :icon="View" @click="goDetail(row.id)">详情</el-button>
-
-              <el-button
-                link
-                type="success"
-                :icon="VideoPlay"
-                :loading="runningTaskId === row.id"
-                :disabled="!canRunTask(row)"
-                @click="handleRun(row)"
-              >
-                {{ getRunButtonText(row) }}
-              </el-button>
 
               <el-button
                 link
@@ -123,6 +112,15 @@
                 @click="goResult(row)"
               >
                 {{ row.status === 'success' ? '查看结果' : '暂无结果' }}
+              </el-button>
+
+              <el-button
+                link
+                type="danger"
+                :icon="Delete"
+                @click="handleDelete(row)"
+              >
+                删除
               </el-button>
             </template>
           </el-table-column>
@@ -204,10 +202,10 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 // 引入所需的图标
 import {
   Search, Refresh, RefreshLeft, Plus, View, VideoPlay, DataBoard,
-  DocumentCopy, InfoFilled, Warning, Connection
+  DocumentCopy, InfoFilled, Warning, Connection, Delete
 } from '@element-plus/icons-vue'
 import {
-  createTask, getTaskList, type CreateTaskPayload,
+  createTask, getTaskList, deleteTask, type CreateTaskPayload,
 } from '@/api/task'
 import {
   buildTaskParamsJson, isFederatedLearningTask, getTaskScenarioCodeFromRow as getTaskScenarioCode,
@@ -344,6 +342,12 @@ function handleGroupChange() {
     total.value = 0
     return
   }
+  
+  // 同时更新 URL 和 localStorage
+  const newQuery = { ...route.query, group_id: queryForm.group_id }
+  router.replace({ query: newQuery })
+  localStorage.setItem('last_task_group_id', String(queryForm.group_id))
+  
   queryForm.page = 1
   loadTasks()
 }
@@ -487,15 +491,62 @@ function getRunButtonText(row: any) {
   return isFlTask ? '下发联邦' : '触发计算'
 }
 
+async function handleDelete(row: any) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除任务「${row.task_name}」吗？此操作不可恢复！`,
+      '删除确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+      }
+    )
+    
+    await deleteTask(row.id)
+    ElMessage.success('任务已删除')
+    await loadTasks()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(error?.response?.data?.detail || '删除失败')
+    }
+  }
+}
+
 onMounted(async () => {
   await loadVisibleGroups()
-  const queryGroupId = route.query.group_id
-  if (queryGroupId) {
-    const gid = Number(queryGroupId)
+  
+  // 优先级：URL 参数 > localStorage > 第一个可见群组
+  const urlGroupId = route.query.group_id
+  const storedGroupId = localStorage.getItem('last_task_group_id')
+  
+  if (urlGroupId) {
+    // 优先使用 URL 参数（支持分享链接）
+    const gid = Number(urlGroupId)
     if (!isNaN(gid)) {
       queryForm.group_id = gid
     }
+  } else if (storedGroupId) {
+    // URL 没有，使用 localStorage（记住上次选择）
+    const gid = Number(storedGroupId)
+    if (!isNaN(gid)) {
+      // 验证该群组是否在可见列表中
+      const groupExists = visibleGroups.value.some(g => g.id === gid)
+      if (groupExists) {
+        queryForm.group_id = gid
+      }
+    }
   }
+  
+  // 如果都没有，且有可见群组，自动选择第一个
+  if (!queryForm.group_id && visibleGroups.value.length > 0) {
+    queryForm.group_id = visibleGroups.value[0].id
+    // 更新 URL 和 localStorage
+    const newQuery = { ...route.query, group_id: queryForm.group_id }
+    router.replace({ query: newQuery })
+    localStorage.setItem('last_task_group_id', String(queryForm.group_id))
+  }
+  
   await loadTasks()
 })
 </script>

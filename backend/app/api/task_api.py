@@ -1493,6 +1493,86 @@ def delete_task_party(
     }
 
 
+@router.delete("/{task_id}")
+def delete_task(
+    task_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    删除任务（物理删除）。
+    
+    删除任务时会级联删除：
+    1. audit_log 审计日志
+    2. chain_record 链上记录
+    3. task_party 参与方记录
+    4. task_result 结果记录
+    
+    注意：此操作不可恢复。
+    """
+    from sqlalchemy import text
+    
+    task = task_service.get_task_or_404(db=db, task_id=task_id)
+    
+    # 权限校验：检查任务群组
+    task_group_id = getattr(task, "group_id", None)
+    if task_group_id:
+        check_group_access(db, current_user.id, task_group_id)
+    
+    task_name = task.task_name
+    
+    try:
+        # 按照外键依赖顺序删除，先删子表，再删主表
+        
+        # 1. 删除 audit_log（有外键约束）
+        db.execute(
+            text("DELETE FROM audit_log WHERE task_id = :task_id"),
+            {"task_id": task_id}
+        )
+        
+        # 2. 删除 chain_record（可能有 task_id 引用）
+        db.execute(
+            text("DELETE FROM chain_record WHERE task_id = :task_id"),
+            {"task_id": task_id}
+        )
+        
+        # 3. 删除 task_party（有外键约束）
+        db.query(TaskParty).filter(TaskParty.task_id == task_id).delete()
+        
+        # 4. 删除 task_result（有外键约束）
+        db.query(TaskResult).filter(TaskResult.task_id == task_id).delete()
+        
+        # 5. 最后删除 task 主表
+        db.delete(task)
+        
+        db.commit()
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"删除任务失败：{str(e)}")
+    
+    # 写入审计日志（在删除后重新创建一条记录）
+    write_task_audit_log(
+        db=db,
+        request=request,
+        current_user=current_user,
+        operation_type="TASK_DELETE",
+        object_type="task",
+        object_id=str(task_id),
+        task_id=None,  # 任务已删除，设为 None
+        operation_desc=f"删除任务：{task_name}",
+        request_json={"task_id": task_id},
+        result_json={"deleted": True},
+    )
+    
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {"task_id": task_id, "deleted": True},
+    }
+
+
 @router.post("/{task_id}/chain-anchor")
 def anchor_task_result(
     task_id: int,

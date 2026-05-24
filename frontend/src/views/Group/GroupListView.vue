@@ -1,18 +1,8 @@
 <template>
   <div class="group-list-page">
-    <!-- 权限范围提示卡片 -->
-    <div class="permission-card">
-      <div class="permission-content">
-        <div class="permission-icon">
-          <span v-if="authStore.isPlatformAdmin">🌐</span>
-          <span v-else-if="isAgencyAdmin">🏢</span>
-          <span v-else>👤</span>
-        </div>
-        <div class="permission-text">
-          <div class="permission-title">当前可见范围</div>
-          <div class="permission-desc">{{ permissionScopeText }}</div>
-        </div>
-      </div>
+    <!-- 顶部操作栏 -->
+    <div class="top-bar">
+      <h2>群组管理</h2>
       <el-button v-if="canCreate" type="primary" @click="showCreateDialog">
         新建群组
       </el-button>
@@ -529,8 +519,6 @@ const canCreate = computed(() => {
 const platformAdminTabs = [
   { label: '全部群组', value: 'all' },
   { label: '待审批', value: 'pending_approval' },
-  { label: '活跃群组', value: 'active' },
-  { label: '已归档', value: 'archived' },
 ]
 
 const agencyAdminTabs = [
@@ -983,6 +971,20 @@ onMounted(() => {
   padding: 20px;
   background: #f5f7fb;
   min-height: 100%;
+}
+
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.top-bar h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: #1f2937;
 }
 
 .permission-card {
