@@ -88,6 +88,7 @@ def _safe_dict(value: Any) -> dict:
         return value
     return {}
 
+
 def _safe_json_dict(value: Any) -> dict:
     """
     兼容 JSON 字段可能是 dict / str / None 的情况。
@@ -106,8 +107,6 @@ def _safe_json_dict(value: Any) -> dict:
             return {}
 
     return {}
-
-
 
 
 def _get_stat_date_str(value, default_value: str) -> str:
@@ -160,8 +159,6 @@ def _build_secretflow_stat_request(task) -> dict:
         "alice_csv": secretflow_params.get("alice_csv") or settings.SECRETFLOW_ALICE_CSV,
         "bob_csv": secretflow_params.get("bob_csv") or settings.SECRETFLOW_BOB_CSV,
     }
-
-
 
 
 def _build_secretflow_fl_request(task) -> dict:
@@ -292,8 +289,6 @@ def _create_or_update_secretflow_stat_result(
     return task_result
 
 
-
-
 def _create_or_update_secretflow_fl_result(
     db: Session,
     task,
@@ -329,8 +324,8 @@ def _create_or_update_secretflow_fl_result(
             "participant_count": summary.get("participant_count") or len(participants),
             "sample_count": summary.get("sample_count") or metrics.get("sample_count"),
             "privacy_mode": summary.get("privacy_mode")
-            or result_json.get("aggregator")
-            or result_json.get("partition_type"),
+                            or result_json.get("aggregator")
+                            or result_json.get("partition_type"),
             "raw_data_export": False,
         }
     )
@@ -543,7 +538,12 @@ def _ensure_bio_task_runtime_ready(agent_url: str | None = None) -> None:
 
 def _run_bio_task_runtime(db: Session, task, template) -> dict:
     """
-    第九阶段：调用 bio-task-runtime 18190 执行 T2 任务。
+    调用 bio-task-runtime 18190 执行通用任务模板。
+
+    当前支持：
+    - T2_SPATIOTEMPORAL_TEMPLATE：跨区县传染病时空预测与共同暴露分析
+    - T3_VACCINE_EFFECT_EVALUATION_TEMPLATE：疫苗安全效果持续评估
+    - T4_HYPERTENSION_FACTOR_INTERACTION_TEMPLATE：高血压危险因素交互作用安全分析
     """
     import requests
     from app.models.group import GroupDataset
@@ -551,15 +551,209 @@ def _run_bio_task_runtime(db: Session, task, template) -> dict:
     from app.models.node import Node
     from app.models.dataset import Dataset
     from app.core.config import settings
-    
-    # 0. 确保 bio-task-runtime 服务可用
+
+    def _template_text_for_match() -> str:
+        values = [
+            getattr(template, "template_code", None),
+            getattr(template, "template_name", None),
+            getattr(template, "name", None),
+            getattr(template, "scenario_name", None),
+            getattr(template, "applicable_scenario", None),
+            getattr(template, "output_type", None),
+            getattr(template, "result_type", None),
+            getattr(template, "description", None),
+            getattr(task, "task_code", None),
+            getattr(task, "task_name", None),
+            getattr(task, "description", None),
+            f"template_id={getattr(task, 'template_id', '')}",
+        ]
+        return " ".join(str(v) for v in values if v)
+
+    def _is_t3_runtime_task() -> bool:
+        text = _template_text_for_match()
+        return (
+            "T3_VACCINE_EFFECT_EVALUATION_TEMPLATE" in text
+            or "疫苗安全效果持续评估" in text
+            or "疫苗效果评估" in text
+            or ("疫苗" in text and ("VE" in text or "保护效果" in text or "接种" in text))
+        )
+
+    def _is_t4_runtime_task() -> bool:
+        text = _template_text_for_match()
+        return (
+            "T4_HYPERTENSION_FACTOR_INTERACTION_TEMPLATE" in text
+            or "T4_HYPERTENSION" in text
+            or "高血压危险因素交互作用" in text
+            or "高血压危险因素交互分析" in text
+            or ("高血压" in text and ("交互" in text or "危险因素" in text or "OR" in text or "回归" in text))
+            or "template_id=7" in text
+        )
+
+    def _resolve_template_code() -> str:
+        raw_code = getattr(template, "template_code", None) if template else None
+        if _is_t4_runtime_task():
+            # 前端新建模板时可能生成 TPL_xxx，这里强制映射到 Runtime 实际目录。
+            return "T4_HYPERTENSION_FACTOR_INTERACTION_TEMPLATE"
+        if _is_t3_runtime_task():
+            # 前端新建模板时可能生成 TPL_xxx，这里强制映射到 Runtime 实际目录。
+            return "T3_VACCINE_EFFECT_EVALUATION_TEMPLATE"
+        return raw_code or "T2_SPATIOTEMPORAL_TEMPLATE"
+
+    def _resolve_party_code(agency, node, dataset, index: int) -> str:
+        text = " ".join(
+            str(v or "")
+            for v in [
+                getattr(agency, "agency_code", None),
+                getattr(agency, "agency_name", None),
+                getattr(node, "node_code", None),
+                getattr(node, "node_name", None),
+                getattr(dataset, "dataset_code", None),
+                getattr(dataset, "dataset_name", None),
+                getattr(dataset, "data_location", None),
+            ]
+        ).upper()
+
+        if "ALICE" in text or "CHANGAN" in text or "长安" in text:
+            return "alice"
+        if "BOB" in text or "QIAOXI" in text or "桥西" in text:
+            return "bob"
+        if "CAROL" in text or "YUHUA" in text or "裕华" in text:
+            return "carol"
+
+        fallback = ["alice", "bob", "carol"]
+        return fallback[index] if index < len(fallback) else f"party_{index + 1}"
+
+    def _build_t3_task_context(participant_rows: list[dict], params_json: dict) -> dict:
+        parties_for_runtime = []
+
+        default_path_by_party = {
+            "alice": "/data/t3/t3_changan_vaccine_eval.csv",
+            "bob": "/data/t3/t3_qiaoxi_vaccine_eval.csv",
+            "carol": "/data/t3/t3_yuhua_vaccine_eval.csv",
+        }
+
+        for item in participant_rows:
+            party_code = item["party_code"]
+            data_path = item.get("dataset_path") or default_path_by_party.get(party_code, "")
+
+            parties_for_runtime.append(
+                {
+                    "party": party_code,
+                    "party_name": item.get("district_name") or item.get("agency_name") or party_code,
+                    "agency_code": item.get("agency_code"),
+                    "district_code": item.get("district_code") or "",
+                    "district_name": item.get("district_name") or item.get("agency_name") or "",
+                    "data_path": data_path,
+                }
+            )
+
+        # 固定顺序，避免前端添加参与方顺序不同导致 Runtime 展示顺序漂移。
+        order = {"alice": 0, "bob": 1, "carol": 2}
+        parties_for_runtime = sorted(
+            parties_for_runtime,
+            key=lambda x: order.get(x.get("party"), 99),
+        )
+
+        return {
+            "task_id": task.id,
+            "task_code": task.task_code or f"task_{task.id}",
+            "task_name": task.task_name,
+            "group_id": getattr(task, "group_id", None),
+            "template_code": "T3_VACCINE_EFFECT_EVALUATION_TEMPLATE",
+            "template_version": "1.0.0",
+            "scenario_code": "T3_VACCINE_EFFECT_EVALUATION",
+            "scenario_name": "疫苗安全效果持续评估",
+            "region_code": params_json.get("region_code", "130100"),
+            "region_name": params_json.get("region_name", "石家庄市"),
+            "task_params": {
+                "use_secretflow": params_json.get("use_secretflow", True),
+                "ray_address": params_json.get("ray_address", "192.168.0.40:10001"),
+                "region_code": params_json.get("region_code", "130100"),
+                "region_name": params_json.get("region_name", "石家庄市"),
+                "date_range": {
+                    "start_date": params_json.get("start_date") or params_json.get(
+                        "analysis_start_date") or "2026-04-01",
+                    "end_date": params_json.get("end_date") or params_json.get("analysis_end_date") or "2026-04-30",
+                },
+                "disease_code": params_json.get("disease_code", "J10"),
+                "disease_name": params_json.get("disease_name", "流感"),
+                "method": params_json.get("method", "TND_OR_VE"),
+            },
+            "parties": parties_for_runtime,
+        }
+
+
+    def _build_t4_task_context(participant_rows: list[dict], params_json: dict) -> dict:
+        parties_for_runtime = []
+
+        default_path_by_party = {
+            "alice": "/data/t4/t4_changan_hypertension_survey.csv",
+            "bob": "/data/t4/t4_qiaoxi_hypertension_survey.csv",
+            "carol": "/data/t4/t4_yuhua_hypertension_survey.csv",
+        }
+
+        default_district_by_party = {
+            "alice": {"district_code": "130102", "district_name": "长安区", "agency_name": "长安区疾控中心"},
+            "bob": {"district_code": "130104", "district_name": "桥西区", "agency_name": "桥西区疾控中心"},
+            "carol": {"district_code": "130108", "district_name": "裕华区", "agency_name": "裕华区疾控中心"},
+        }
+
+        for item in participant_rows:
+            party_code = item["party_code"]
+            default_info = default_district_by_party.get(party_code, {})
+            dataset_path = item.get("dataset_path") or default_path_by_party.get(party_code, "")
+
+            parties_for_runtime.append(
+                {
+                    "party": party_code,
+                    "party_name": item.get("district_name") or default_info.get("district_name") or party_code,
+                    "agency_name": item.get("agency_name") or default_info.get("agency_name") or "",
+                    "district_code": item.get("district_code") or default_info.get("district_code") or "",
+                    "district_name": item.get("district_name") or default_info.get("district_name") or "",
+                    "dataset_path": dataset_path,
+                }
+            )
+
+        # 固定顺序，避免前端添加参与方顺序不同导致 Runtime 展示顺序漂移。
+        order = {"alice": 0, "bob": 1, "carol": 2}
+        parties_for_runtime = sorted(
+            parties_for_runtime,
+            key=lambda x: order.get(x.get("party"), 99),
+        )
+
+        return {
+            "task_id": task.id,
+            "task_code": task.task_code or f"task_{task.id}",
+            "task_name": task.task_name,
+            "group_id": getattr(task, "group_id", None),
+            "template_code": "T4_HYPERTENSION_FACTOR_INTERACTION_TEMPLATE",
+            "template_version": "1.0.0",
+            "scenario_code": "T4_HYPERTENSION_FACTOR_INTERACTION_ANALYSIS",
+            "scenario_name": "高血压危险因素交互作用安全分析",
+            "ray_address": params_json.get("ray_address", "192.168.0.40:10001"),
+            "stat_period": {
+                "start_date": params_json.get("start_date") or params_json.get("analysis_start_date") or "2026-04-01",
+                "end_date": params_json.get("end_date") or params_json.get("analysis_end_date") or "2026-04-30",
+            },
+            "params": {
+                "target_disease": "hypertension",
+                "target_field": "hypertension_flag",
+                "analysis_name": "高血压危险因素交互作用安全分析",
+            },
+            "parties": parties_for_runtime,
+        }
+
+    # 0. 查询参与方并确保 bio-task-runtime 服务可用
     parties = (
         db.query(TaskParty)
         .filter(TaskParty.task_id == task.id)
         .order_by(TaskParty.id.asc())
         .all()
     )
-    
+
+    if not parties:
+        raise HTTPException(status_code=400, detail="任务参与方为空，无法执行任务")
+
     agent_url = None
     for party in parties:
         if party.node_id:
@@ -567,35 +761,33 @@ def _run_bio_task_runtime(db: Session, task, template) -> dict:
             if node and node.agent_url:
                 agent_url = node.agent_url
                 break
-    
+
     _ensure_bio_task_runtime_ready(agent_url)
-    
-    # 1. 查询参与方（已在上面查询）
-    if not parties:
-        raise HTTPException(status_code=400, detail="任务参与方为空，无法执行任务")
-    
-    # 2. 组装 participants
+
+    # 1. 组装 participants，同时为 T3 生成 party 映射。
     participants = []
-    for party in parties:
+    participant_rows = []
+
+    for index, party in enumerate(parties):
         agency = db.query(Agency).filter(Agency.id == party.agency_id).first()
         node = db.query(Node).filter(Node.id == party.node_id).first() if party.node_id else None
         dataset = db.query(Dataset).filter(Dataset.id == party.dataset_id).first() if party.dataset_id else None
-        
+
         if not agency:
             raise HTTPException(status_code=400, detail=f"参与方机构不存在：agency_id={party.agency_id}")
-        
-        # 转换角色
+
         roles = []
         if party.party_role:
             roles = [r.strip() for r in party.party_role.split(",") if r.strip()]
-        
-        # 数据提供方必须有数据集
+
         if "data_provider" in roles and not dataset:
             raise HTTPException(
                 status_code=400,
                 detail=f"数据提供方缺少数据集配置：agency={agency.agency_name}"
             )
-        
+
+        party_code = _resolve_party_code(agency=agency, node=node, dataset=dataset, index=index)
+
         participant = {
             "agency_code": agency.agency_code or f"AGENCY_{agency.id}",
             "agency_name": agency.agency_name,
@@ -608,65 +800,84 @@ def _run_bio_task_runtime(db: Session, task, template) -> dict:
             "roles": roles,
         }
         participants.append(participant)
-    
-    # 3. 查找辅助数据集
+
+        participant_rows.append(
+            {
+                **participant,
+                "party_code": party_code,
+            }
+        )
+
+    # 2. 查找辅助数据集。T2 会用到；T3 不依赖，但保留不影响。
     group_id = task.group_id
     auxiliary_datasets = {
         "grid_daily_stats_path": "",
         "grid_catalog_path": "",
     }
-    
+
     if group_id:
         group_datasets = db.query(GroupDataset).filter(
             GroupDataset.group_id == group_id,
             GroupDataset.auth_status == "active",
         ).all()
-        
+
         for gd in group_datasets:
             ds = db.query(Dataset).filter(Dataset.id == gd.dataset_id).first()
             if not ds:
                 continue
-            
-            # 匹配网格日统计数据
+
             if "grid_daily_stats" in (ds.dataset_type or "") or "空间网格日统计" in (ds.dataset_name or ""):
                 auxiliary_datasets["grid_daily_stats_path"] = ds.data_location or ""
-            
-            # 匹配网格目录数据
+
             if "grid_catalog" in (ds.dataset_type or "") or "空间网格目录" in (ds.dataset_name or ""):
                 auxiliary_datasets["grid_catalog_path"] = ds.data_location or ""
-    
-    # 4. 组装 task_context
+
+    # 3. 组装 task_context
     params_json = _safe_json_dict(getattr(task, "params_json", None))
-    
-    task_context = {
-        "task_id": task.id,
-        "task_name": task.task_name,
-        "group_id": group_id,
-        "template_code": template.template_code if template else "T2_SPATIOTEMPORAL_TEMPLATE",
-        "template_version": "1.0.0",
-        "scenario_code": "infectious_spatiotemporal_prediction",
-        "disease_code": "J10.1",
-        "disease_name": "流感",
-        "participants": participants,
-        "auxiliary_datasets": auxiliary_datasets,
-        "params": {
-            "analysis_start_date": params_json.get("analysis_start_date", "2026-04-01"),
-            "analysis_end_date": params_json.get("analysis_end_date", "2026-04-30"),
-            "recent_window_days": params_json.get("recent_window_days", 7),
-            "prediction_window_days": params_json.get("prediction_window_days", 7),
-            "top_grid_n": params_json.get("top_grid_n", 10),
-            "common_exposure_min_cases": params_json.get("common_exposure_min_cases", 6),
-        },
-    }
-    
-    # 5. 更新任务状态为运行中
+    template_code = _resolve_template_code()
+    is_t3_task = template_code == "T3_VACCINE_EFFECT_EVALUATION_TEMPLATE"
+    is_t4_task = template_code == "T4_HYPERTENSION_FACTOR_INTERACTION_TEMPLATE"
+
+    if is_t3_task:
+        task_context = _build_t3_task_context(participant_rows=participant_rows, params_json=params_json)
+        task_result_type = "vaccine_effect_evaluation"
+    elif is_t4_task:
+        task_context = _build_t4_task_context(participant_rows=participant_rows, params_json=params_json)
+        task_result_type = "hypertension_factor_interaction"
+    else:
+        task_context = {
+            "task_id": task.id,
+            "task_name": task.task_name,
+            "group_id": group_id,
+            "template_code": template_code,
+            "template_version": "1.0.0",
+            "scenario_code": "infectious_spatiotemporal_prediction",
+            "disease_code": "J10.1",
+            "disease_name": "流感",
+            "participants": participants,
+            "auxiliary_datasets": auxiliary_datasets,
+            "params": {
+                "analysis_start_date": params_json.get("analysis_start_date", "2026-04-01"),
+                "analysis_end_date": params_json.get("analysis_end_date", "2026-04-30"),
+                "recent_window_days": params_json.get("recent_window_days", 7),
+                "prediction_window_days": params_json.get("prediction_window_days", 7),
+                "top_grid_n": params_json.get("top_grid_n", 10),
+                "common_exposure_min_cases": params_json.get("common_exposure_min_cases", 6),
+            },
+        }
+        task_result_type = "spatiotemporal_prediction"
+
+    # 4. 更新任务状态为运行中
     task.status = "running"
+    for party in parties:
+        party.status = "running"
+        party.error_message = None
     db.commit()
-    
-    # 6. 调用 bio-task-runtime
+
+    # 5. 调用 bio-task-runtime
     runtime_url = settings.BIO_TASK_RUNTIME_URL
     timeout = settings.BIO_TASK_RUNTIME_TIMEOUT
-    
+
     try:
         response = requests.post(
             f"{runtime_url}/tasks/run",
@@ -676,23 +887,28 @@ def _run_bio_task_runtime(db: Session, task, template) -> dict:
             },
             timeout=timeout + 10,
         )
-        
+
         if response.status_code != 200:
             task.status = "failed"
+            for party in parties:
+                party.status = "failed"
+                party.error_message = f"任务运行服务返回错误：HTTP {response.status_code}"
             db.commit()
             raise HTTPException(
                 status_code=502,
-                detail=f"任务运行服务返回错误：HTTP {response.status_code}"
+                detail=f"任务运行服务返回错误：HTTP {response.status_code}, {response.text[:500]}"
             )
-        
+
         runtime_result = response.json()
-        
-        # 打印 Runtime response 前 3000 字符
+
         runtime_str = str(runtime_result)
         print(f"[DEBUG] Runtime response (first 3000 chars): {runtime_str[:3000]}")
-        
+
     except requests.exceptions.ConnectionError:
         task.status = "failed"
+        for party in parties:
+            party.status = "failed"
+            party.error_message = "任务运行服务不可用，请检查 bio-task-runtime 18190"
         db.commit()
         raise HTTPException(
             status_code=502,
@@ -700,6 +916,9 @@ def _run_bio_task_runtime(db: Session, task, template) -> dict:
         )
     except requests.exceptions.Timeout:
         task.status = "failed"
+        for party in parties:
+            party.status = "failed"
+            party.error_message = f"任务执行超时（{timeout}秒）"
         db.commit()
         raise HTTPException(
             status_code=504,
@@ -707,81 +926,100 @@ def _run_bio_task_runtime(db: Session, task, template) -> dict:
         )
     except Exception as e:
         task.status = "failed"
+        for party in parties:
+            party.status = "failed"
+            party.error_message = str(e)
         db.commit()
         raise HTTPException(status_code=500, detail=f"调用任务运行服务失败：{str(e)}")
-    
-    # 7. 检查 runtime 返回结果
+
+    # 6. 检查 runtime 返回结果
+    result = runtime_result.get("result") or {}
     runtime_success = (
         runtime_result.get("success") is True
-        and runtime_result.get("status") == "success"
-        and runtime_result.get("result") is not None
+        and runtime_result.get("status", "success") == "success"
+        and isinstance(result, dict)
+        and bool(result)
     )
-    
-    result = runtime_result.get("result", {})
-    result_hash = runtime_result.get("result_hash", "")
+
+    result_hash = (
+        runtime_result.get("result_hash")
+        or result.get("result_hash")
+        or _calc_sha256(result)
+    )
     message = runtime_result.get("message", "")
-    
-    print(f"[DEBUG] Runtime success check: success={runtime_result.get('success')}, status={runtime_result.get('status')}, result_exists={result is not None}")
+
+    print(
+        f"[DEBUG] Runtime success check: success={runtime_result.get('success')}, "
+        f"status={runtime_result.get('status')}, result_exists={bool(result)}"
+    )
     print(f"[DEBUG] runtime_success={runtime_success}")
-    
-    if not runtime_success:
-        task.status = "failed"
-        db.commit()
-        
-        # 写入失败结果（更新或插入）
-        existing_result = db.query(TaskResult).filter(TaskResult.task_id == task.id).first()
-        
-        if existing_result:
-            existing_result.result_json = runtime_result
-            existing_result.result_hash = result_hash
-            existing_result.status = "failed"
-            existing_result.error_message = message
-            existing_result.group_id = group_id
-            existing_result.agency_id = task.creator_agency_id
-            existing_result.task_type = "spatiotemporal_prediction"
-            existing_result.anchor_status = None
-            existing_result.anchor_time = None
-            existing_result.chain_record_id = None
-            if hasattr(existing_result, "result_version"):
-                existing_result.result_version = (existing_result.result_version or 1) + 1
-            task_result = existing_result
-        else:
-            task_result = TaskResult(
-                task_id=task.id,
-                result_json=runtime_result,
-                result_hash=result_hash,
-                status="failed",
-                error_message=message,
-                group_id=group_id,
-                agency_id=task.creator_agency_id,
-                task_type="spatiotemporal_prediction",
-                result_version=1,
-            )
-            db.add(task_result)
-        
-        db.commit()
-        
+
+    def _build_runtime_metrics(result_json: dict) -> dict:
+        if is_t3_task:
+            summary = _safe_json_dict(result_json.get("summary"))
+            overall_effect = _safe_json_dict(result_json.get("overall_effect"))
+            return {
+                "scenario_code": result_json.get("scenario_code"),
+                "scenario_name": result_json.get("scenario_name"),
+                "template_code": result_json.get("template_code"),
+                "framework": _safe_json_dict(result_json.get("execution_info")).get("framework"),
+                "execution_mode": _safe_json_dict(result_json.get("execution_info")).get("execution_mode"),
+                "total_count": summary.get("total_count"),
+                "positive_count": summary.get("positive_count"),
+                "negative_count": summary.get("negative_count"),
+                "vaccinated_count": summary.get("vaccinated_count"),
+                "unvaccinated_count": summary.get("unvaccinated_count"),
+                "vaccination_rate": summary.get("vaccination_rate"),
+                "positive_rate": summary.get("positive_rate"),
+                "overall_ve": summary.get("overall_ve"),
+                "or_value": overall_effect.get("or_value"),
+                "participant_count": len(result_json.get("participants") or []),
+            }
+
+        if is_t4_task:
+            summary = _safe_json_dict(result_json.get("summary"))
+            execution_info = _safe_json_dict(result_json.get("execution_info"))
+            return {
+                "scenario_code": result_json.get("scenario_code"),
+                "scenario_name": result_json.get("scenario_name"),
+                "template_code": result_json.get("template_code"),
+                "framework": result_json.get("framework") or execution_info.get("framework"),
+                "execution_mode": result_json.get("execution_mode") or execution_info.get("execution_mode"),
+                "total_count": summary.get("total_count"),
+                "hypertension_count": summary.get("hypertension_count"),
+                "hypertension_rate": summary.get("hypertension_rate"),
+                "hypertension_rate_percent": summary.get("hypertension_rate_percent"),
+                "high_risk_count": summary.get("high_risk_count"),
+                "high_risk_rate": summary.get("high_risk_rate"),
+                "top_single_factor": summary.get("top_single_factor"),
+                "top_single_factor_or": summary.get("top_single_factor_or"),
+                "top_interaction_factor": summary.get("top_interaction_factor"),
+                "top_interaction_factor_or": summary.get("top_interaction_factor_or"),
+                "participant_count": len(result_json.get("participants") or []),
+            }
+
         return {
-            "task_id": task.id,
-            "status": "failed",
-            "message": message,
-            "result_hash": result_hash,
+            "scenario_code": result_json.get("scenario_code"),
+            "scenario_name": result_json.get("scenario_name"),
+            "case_count": result_json.get("case_count"),
+            "positive_count": result_json.get("positive_count"),
+            "positive_rate": result_json.get("positive_rate"),
+            "unique_patient_count": result_json.get("unique_patient_count"),
+            "framework": result_json.get("framework"),
         }
-    
-    # 8. 写入成功结果（更新或插入）
-    from datetime import datetime
-    
+
+    # 7. 写入结果（失败或成功均更新/插入 task_result）
     existing_result = db.query(TaskResult).filter(TaskResult.task_id == task.id).first()
-    
+
     if existing_result:
-        # 更新已有结果
-        existing_result.result_json = result
+        existing_result.result_json = result if runtime_success else runtime_result
+        existing_result.metrics_json = _build_runtime_metrics(result) if runtime_success else {}
         existing_result.result_hash = result_hash
-        existing_result.status = "success"
-        existing_result.error_message = None
+        existing_result.status = "success" if runtime_success else "failed"
+        existing_result.error_message = None if runtime_success else message
         existing_result.group_id = group_id
         existing_result.agency_id = task.creator_agency_id or task.lead_agency_id
-        existing_result.task_type = "spatiotemporal_prediction"
+        existing_result.task_type = task_result_type
         existing_result.anchor_status = None
         existing_result.anchor_time = None
         existing_result.chain_record_id = None
@@ -790,40 +1028,64 @@ def _run_bio_task_runtime(db: Session, task, template) -> dict:
         if hasattr(existing_result, "updated_at"):
             existing_result.updated_at = datetime.now()
         task_result = existing_result
-        print(f"[INFO] Updated existing task_result for task_id={task.id}, result_id={task_result.id}")
     else:
-        # 插入新结果
         task_result = TaskResult(
             task_id=task.id,
-            result_json=result,
+            result_json=result if runtime_success else runtime_result,
+            metrics_json=_build_runtime_metrics(result) if runtime_success else {},
             result_hash=result_hash,
-            status="success",
-            error_message=None,
+            status="success" if runtime_success else "failed",
+            error_message=None if runtime_success else message,
             group_id=group_id,
             agency_id=task.creator_agency_id or task.lead_agency_id,
-            task_type="spatiotemporal_prediction",
+            task_type=task_result_type,
             result_version=1,
         )
         db.add(task_result)
-        print(f"[INFO] Created new task_result for task_id={task.id}")
-    
-    # 更新任务状态
-    task.status = "success"
+
+    if runtime_success:
+        task.status = "success"
+        for party in parties:
+            party.status = "success"
+            party.error_message = None
+    else:
+        task.status = "failed"
+        for party in parties:
+            party.status = "failed"
+            party.error_message = message
+
     if hasattr(task, "updated_at"):
         task.updated_at = datetime.now()
-    
+
     db.commit()
+    db.refresh(task)
     db.refresh(task_result)
-    
+
+    if not runtime_success:
+        return {
+            "task": task_service.task_to_dict(task),
+            "parties": [task_service.party_to_dict(party) for party in parties],
+            "result": _task_result_to_dict(task_result),
+            "runtime_request": task_context,
+            "runtime_response": runtime_result,
+            "message": message or "任务执行失败",
+        }
+
     print(f"[SUCCESS] Task {task.id} executed successfully, result_id={task_result.id}, result_hash={result_hash}")
-    
+
     return {
-        "task_id": task.id,
-        "result_id": task_result.id,
-        "status": "success",
-        "message": "任务执行成功",
-        "result_hash": task_result.result_hash,
-        "duration_seconds": runtime_result.get("duration_seconds", 0),
+        "task": task_service.task_to_dict(task),
+        "parties": [task_service.party_to_dict(party) for party in parties],
+        "result": _task_result_to_dict(task_result),
+        "runtime_request": task_context,
+        "runtime_response": {
+            "success": runtime_result.get("success"),
+            "status": runtime_result.get("status"),
+            "message": runtime_result.get("message"),
+            "result_hash": result_hash,
+            "duration_seconds": runtime_result.get("duration_seconds", 0),
+        },
+        "message": "Bio Task Runtime 任务执行成功，已生成结果",
     }
 
 
@@ -1417,14 +1679,14 @@ def create_task_party(
     has_data_provider = 'data_provider' in roles
 
     data_resource_name = getattr(party_create, 'data_resource_name', None)
-    
+
     if has_data_provider:
         if not party_create.dataset_id and not data_resource_name:
             raise HTTPException(status_code=400, detail="数据提供方必须选择数据资源")
-        
+
         if not party_create.dataset_id and data_resource_name:
             dataset_query = db.query(Dataset).join(
-                GroupDataset, 
+                GroupDataset,
                 GroupDataset.dataset_id == Dataset.id
             ).filter(
                 GroupDataset.group_id == group_id,
@@ -1432,26 +1694,26 @@ def create_task_party(
                 Dataset.agency_id == party_create.agency_id,
                 Dataset.dataset_name == data_resource_name,
             )
-            
+
             if party_create.node_id:
                 dataset_query = dataset_query.filter(Dataset.node_id == party_create.node_id)
-            
+
             matching_datasets = dataset_query.all()
-            
+
             if not matching_datasets:
                 node_hint = f"、节点ID={party_create.node_id}" if party_create.node_id else ""
                 raise HTTPException(
-                    status_code=400, 
+                    status_code=400,
                     detail=f"未找到匹配的数据集：机构ID={party_create.agency_id}{node_hint}、数据资源名称='{data_resource_name}'。请检查数据集是否已授权给当前群组，或联系管理员添加数据授权。"
                 )
-            
+
             if len(matching_datasets) > 1:
                 dataset_ids = [d.id for d in matching_datasets]
                 raise HTTPException(
-                    status_code=400, 
+                    status_code=400,
                     detail=f"数据资源匹配到多条记录（dataset_id={dataset_ids}），请检查数据集名称、机构和节点配置是否唯一。建议联系管理员检查数据集配置。"
                 )
-            
+
             party_create.dataset_id = matching_datasets[0].id
 
     party_columns = {column.name for column in TaskParty.__table__.columns}
@@ -1566,56 +1828,56 @@ def delete_task(
 ):
     """
     删除任务（物理删除）。
-    
+
     删除任务时会级联删除：
     1. audit_log 审计日志
     2. chain_record 链上记录
     3. task_party 参与方记录
     4. task_result 结果记录
-    
+
     注意：此操作不可恢复。
     """
     from sqlalchemy import text
-    
+
     task = task_service.get_task_or_404(db=db, task_id=task_id)
-    
+
     # 权限校验：检查任务群组
     task_group_id = getattr(task, "group_id", None)
     if task_group_id:
         check_group_access(db, current_user.id, task_group_id)
-    
+
     task_name = task.task_name
-    
+
     try:
         # 按照外键依赖顺序删除，先删子表，再删主表
-        
+
         # 1. 删除 audit_log（有外键约束）
         db.execute(
             text("DELETE FROM audit_log WHERE task_id = :task_id"),
             {"task_id": task_id}
         )
-        
+
         # 2. 删除 chain_record（可能有 task_id 引用）
         db.execute(
             text("DELETE FROM chain_record WHERE task_id = :task_id"),
             {"task_id": task_id}
         )
-        
+
         # 3. 删除 task_party（有外键约束）
         db.query(TaskParty).filter(TaskParty.task_id == task_id).delete()
-        
+
         # 4. 删除 task_result（有外键约束）
         db.query(TaskResult).filter(TaskResult.task_id == task_id).delete()
-        
+
         # 5. 最后删除 task 主表
         db.delete(task)
-        
+
         db.commit()
-        
+
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"删除任务失败：{str(e)}")
-    
+
     # 写入审计日志（在删除后重新创建一条记录）
     write_task_audit_log(
         db=db,
@@ -1629,7 +1891,7 @@ def delete_task(
         request_json={"task_id": task_id},
         result_json={"deleted": True},
     )
-    
+
     return {
         "code": 0,
         "message": "success",
@@ -1832,7 +2094,7 @@ def run_task(
     - federated_learning：调用 Alice SecretFlow 联邦训练服务，生成真实训练结果。
     """
     from app.models.stat_template import StatTemplate
-    
+
     task = task_service.get_task_or_404(db=db, task_id=task_id)
 
     # 权限校验：governor 不可执行任务
@@ -1842,13 +2104,45 @@ def run_task(
     template = None
     if task.template_id:
         template = db.query(StatTemplate).filter(StatTemplate.id == task.template_id).first()
-    
+
     template_code = template.template_code if template else None
     params_json = _safe_json_dict(getattr(task, "params_json", None))
     task_type = params_json.get("task_type") or "statistic"
 
-    # T2 任务判断：template_code 以 "T2" 开头
-    if template_code and template_code.startswith("T2"):
+    template_text = " ".join(
+        str(v)
+        for v in [
+            template_code,
+            getattr(template, "template_name", None) if template else None,
+            getattr(template, "name", None) if template else None,
+            getattr(template, "output_type", None) if template else None,
+            getattr(template, "result_type", None) if template else None,
+            getattr(template, "applicable_scenario", None) if template else None,
+            getattr(task, "task_code", None),
+            getattr(task, "task_name", None),
+            getattr(task, "description", None),
+            f"template_id={getattr(task, 'template_id', '')}",
+        ]
+        if v
+    )
+
+    is_runtime_task = (
+        (template_code and template_code.startswith("T2"))
+        or "T2_SPATIOTEMPORAL_TEMPLATE" in template_text
+        or "T3_VACCINE_EFFECT_EVALUATION_TEMPLATE" in template_text
+        or "疫苗安全效果持续评估" in template_text
+        or "疫苗效果评估" in template_text
+        or ("疫苗" in template_text and ("保护效果" in template_text or "接种" in template_text))
+        or "T4_HYPERTENSION_FACTOR_INTERACTION_TEMPLATE" in template_text
+        or "T4_HYPERTENSION" in template_text
+        or "高血压危险因素交互作用" in template_text
+        or "高血压危险因素交互分析" in template_text
+        or ("高血压" in template_text and ("交互" in template_text or "危险因素" in template_text or "OR" in template_text or "回归" in template_text))
+        or "template_id=7" in template_text
+    )
+
+    # T2 / T3 / 后续模板化任务统一走 18190 Bio Task Runtime。
+    if is_runtime_task:
         data = _run_bio_task_runtime(
             db=db,
             task=task,
@@ -1882,7 +2176,7 @@ def run_task(
             "task_type": audit_result_json.get("task_type"),
             "executor": (
                 "bio_task_runtime"
-                if template_code and template_code.startswith("T2")
+                if is_runtime_task
                 else (
                     "secretflow_fl"
                     if audit_result_json.get("task_type") == "federated_learning"

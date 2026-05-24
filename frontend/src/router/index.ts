@@ -56,6 +56,14 @@ const router = createRouter({
           },
         },
         {
+          path: 'tasks/:id/t3-result',
+          name: 'T3TaskResult',
+          component: () => import('@/views/T3TaskResultView.vue'),
+          meta: {
+            title: '疫苗效果评估结果',
+          },
+        },
+        {
           path: 'tasks/:id',
           name: 'TaskDetail',
           component: () => import('@/views/TaskDetailView.vue'),

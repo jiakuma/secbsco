@@ -56,7 +56,6 @@
                 <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
                 <el-button v-if="row.status === 'active'" link type="warning" @click="handleDisable(row)">停用</el-button>
                 <el-button v-if="row.status === 'disabled'" link type="success" @click="handleEnable(row)">启用</el-button>
-                <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
               </template>
             </el-table-column>
           </el-table>

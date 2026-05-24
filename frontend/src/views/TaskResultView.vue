@@ -2,7 +2,13 @@
   <div class="task-result-page">
     <!-- T2 任务使用专用结果页面 -->
     <T2TaskResultView v-if="isT2Task" />
-    
+
+    <!-- T3 任务使用疫苗效果评估专用结果页面 -->
+    <T3TaskResultView v-else-if="isT3Task" />
+
+    <!-- T4 任务使用高血压危险因素交互分析专用结果页面 -->
+    <T4TaskResultView v-else-if="isT4Task" />
+
     <!-- 其他任务使用原有结果页面 -->
     <template v-else>
       <header class="page-header">
@@ -188,6 +194,8 @@ import { getChainRecordList } from '@/api/chainRecord'
 import { isFederatedLearningTask, parseJsonValue } from '@/constants/taskScenario'
 import FederatedAnimation from '@/components/FederatedAnimation.vue'
 import T2TaskResultView from './T2TaskResultView.vue'
+import T3TaskResultView from './T3TaskResultView.vue'
+import T4TaskResultView from './T4TaskResultView.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -207,6 +215,44 @@ const isT2Task = computed(() => {
   const paramsJson = taskDetail.value.params_json || {}
   const templateCode = paramsJson.template_code || taskDetail.value.template_code || ''
   return templateCode.startsWith('T2')
+})
+
+const isT3Task = computed(() => {
+  if (!taskDetail.value) return false
+
+  const paramsJson = taskDetail.value.params_json || {}
+  const templateCode = String(paramsJson.template_code || taskDetail.value.template_code || '')
+  const taskCode = String(taskDetail.value.task_code || '')
+  const taskName = String(taskDetail.value.task_name || '')
+
+  return (
+    templateCode === 'T3_VACCINE_EFFECT_EVALUATION_TEMPLATE' ||
+    templateCode.startsWith('T3') ||
+    taskCode.includes('T3_VACCINE_EFFECT') ||
+    taskName.includes('疫苗') ||
+    taskName.includes('接种') ||
+    taskName.includes('保护效果')
+  )
+})
+
+const isT4Task = computed(() => {
+  if (!taskDetail.value) return false
+
+  const paramsJson = taskDetail.value.params_json || {}
+  const templateCode = String(paramsJson.template_code || taskDetail.value.template_code || '').toUpperCase()
+  const taskCode = String(taskDetail.value.task_code || '').toUpperCase()
+  const taskName = String(taskDetail.value.task_name || '')
+  const description = String(taskDetail.value.description || '')
+  const templateId = Number(taskDetail.value.template_id || 0)
+
+  return (
+    templateCode === 'T4_HYPERTENSION_FACTOR_INTERACTION_TEMPLATE' ||
+    templateCode.startsWith('T4_HYPERTENSION') ||
+    taskCode.includes('T4_HYPERTENSION') ||
+    taskName.includes('高血压') ||
+    description.includes('高血压') ||
+    templateId === 7
+  )
 })
 
 function unwrapResponse(res: any) {

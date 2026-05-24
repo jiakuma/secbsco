@@ -58,7 +58,6 @@
             <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
             <el-button v-if="canActivate(row)" link type="success" @click="handleActivate(row)">激活</el-button>
             <el-button v-else-if="canDeactivate(row)" link type="warning" @click="handleDeactivate(row)">停用</el-button>
-            <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -158,7 +157,7 @@ function canActivate(row:any){ return ['registered','failed','offline','disabled
 function canDeactivate(row:any){ return ['active','checking'].includes(row.status) }
 
 async function handleCheck(row:any){ try{ await checkNode(row.id); ElMessage.success('检测完成'); await loadList() }catch(e:any){ ElMessage.error(e?.response?.data?.detail || '检测失败') } }
-async function handleActivate(row:any){ await ElMessageBox.confirm(`确认激活节点「${row.node_name}」？`,'激活确认',{type:'warning'}); try{ await activateNode(row.id); ElMessage.success('已激活'); await loadList() }catch(e:any){ ElMessage.error(e?.response?.data?.detail || '激活失败') } }
+async function handleActivate(row:any){ await ElMessageBox.confirm(`确认激活节点「${row.node_name}」？`,'激活确认',{type:'warning'}); try{ await activateNode(row.id); ElMessage.success('已激活'); await loadList() }catch(e:any){ ElMessage.error(e?.response?.data?.detail || '激活失败'); await loadList() } }
 async function handleDeactivate(row:any){ await ElMessageBox.confirm(`确认停用节点「${row.node_name}」？`,'停用确认',{type:'warning'}); try{ await deactivateNode(row.id); ElMessage.success('已停用'); await loadList() }catch(e:any){ ElMessage.error(e?.response?.data?.detail || '停用失败') } }
 async function handleDelete(row:any){
   await ElMessageBox.confirm(`确认物理删除节点「${row.node_name}」？该节点的群组授权关系将一并删除。`,'删除确认',{type:'warning'})
