@@ -4,19 +4,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api import (
     health_api,
-    auth_api,
-    user_api,
-    group_api,
-    agency_api,
-    node_api,
-    dataset_api,
-    stat_template_api,
-    task_api,
-    task_result_api,
-    audit_log_api,
-    chain_record_api,
     dashboard_api,
 )
+from app.contexts.task.adapters.api import router as task_router
+from app.contexts.task.adapters.api import result_router as task_result_router
+from app.contexts.audit_log.adapters.api import router as audit_log_router
+from app.contexts.chain_record.adapters.api import router as chain_record_router
+from app.contexts.agency.adapters import router as agency_router
+from app.contexts.identity.adapters.auth_api import router as auth_router
+from app.contexts.identity.adapters.user_api import router as user_router
+from app.contexts.node.adapters.api import router as node_router
+from app.contexts.dataset.adapters.api import router as dataset_router
+from app.contexts.template.adapters.api import router as template_router
+from app.contexts.group.adapters.api import router as group_router
 
 
 app = FastAPI(
@@ -39,17 +39,17 @@ app.add_middleware(
 
 
 app.include_router(health_api.router)
-app.include_router(auth_api.router)
-app.include_router(user_api.router)
-app.include_router(group_api.router)
-app.include_router(agency_api.router)
-app.include_router(node_api.router)
-app.include_router(dataset_api.router)
-app.include_router(stat_template_api.router)
-app.include_router(task_api.router)
-app.include_router(task_result_api.router)
-app.include_router(audit_log_api.router)
-app.include_router(chain_record_api.router)
+app.include_router(auth_router)
+app.include_router(user_router)
+app.include_router(group_router)
+app.include_router(agency_router)
+app.include_router(node_router)
+app.include_router(dataset_router)
+app.include_router(template_router)
+app.include_router(task_router)
+app.include_router(task_result_router)
+app.include_router(audit_log_router)
+app.include_router(chain_record_router)
 app.include_router(dashboard_api.router)
 
 @app.get("/")
