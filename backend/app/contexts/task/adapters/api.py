@@ -45,7 +45,7 @@ def create_task(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.services.task_service import create_task as _create
+    from app.contexts.shared.task_service import create_task as _create
     data = payload.model_dump(exclude_unset=True)
     data["creator_user_id"] = current_user.id
     data["creator_agency_id"] = current_user.agency_id
@@ -60,7 +60,7 @@ def get_task_detail(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.services.task_service import get_task_detail as _detail
+    from app.contexts.shared.task_service import get_task_detail as _detail
     result = _detail(db, task_id)
     return success(result)
 
@@ -73,7 +73,7 @@ def update_task(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.services.task_service import update_task as _update
+    from app.contexts.shared.task_service import update_task as _update
     result = _update(db, task_id, payload)
     db.commit()
     return success(result)
@@ -87,7 +87,7 @@ def update_task_status(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.services.task_service import update_task_status as _update
+    from app.contexts.shared.task_service import update_task_status as _update
     result = _update(db, task_id, payload)
     db.commit()
     return success(result)
@@ -99,7 +99,7 @@ def list_task_parties(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.services.task_service import list_task_parties as _list
+    from app.contexts.shared.task_service import list_task_parties as _list
     result = _list(db, task_id)
     return success(result)
 
@@ -112,7 +112,7 @@ def create_task_party(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.api.task_api import create_task_party as _old_create
+    from app.contexts.shared.task_api_legacy import create_task_party as _old_create
     result = _old_create(task_id, payload, request, db, current_user)
     return result
 
@@ -126,7 +126,7 @@ def update_task_party(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.services.task_service import update_task_party as _update
+    from app.contexts.shared.task_service import update_task_party as _update
     result = _update(db, task_id, party_id, payload)
     db.commit()
     return success(result)
@@ -140,7 +140,7 @@ def delete_task_party(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.services.task_service import delete_task_party as _delete
+    from app.contexts.shared.task_service import delete_task_party as _delete
     result = _delete(db, task_id, party_id)
     db.commit()
     return success(result)
@@ -153,7 +153,7 @@ def delete_task(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.api.task_api import delete_task as _old_delete
+    from app.contexts.shared.task_api_legacy import delete_task as _old_delete
     return _old_delete(task_id, request, db, current_user)
 
 
@@ -164,7 +164,7 @@ def anchor_task_result(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.api.task_api import anchor_task_result as _old_anchor
+    from app.contexts.shared.task_api_legacy import anchor_task_result as _old_anchor
     return _old_anchor(task_id, request, db, current_user)
 
 
@@ -175,7 +175,7 @@ def run_task(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.api.task_api import run_task as _old_run
+    from app.contexts.shared.task_api_legacy import run_task as _old_run
     return _old_run(task_id, request, db, current_user)
 
 
@@ -185,8 +185,8 @@ def get_result_by_task(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.services.task_service import get_task_or_404
-    from app.services.task_result_service import TaskResultService
+    from app.contexts.shared.task_service import get_task_or_404
+    from app.contexts.shared.task_result_service import TaskResultService
     from fastapi import HTTPException
     get_task_or_404(db, task_id)
     result = TaskResultService.get_result_by_task_id(db, task_id)
@@ -207,7 +207,7 @@ def list_task_results(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.services.task_result_service import TaskResultService
+    from app.contexts.shared.task_result_service import TaskResultService
     total, items = TaskResultService.list_results(db, task_id=task_id, status=status, page=page, page_size=page_size)
     return success({
         "total": total, "page": page, "page_size": page_size,
@@ -221,7 +221,7 @@ def get_task_result(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.services.task_result_service import TaskResultService
+    from app.contexts.shared.task_result_service import TaskResultService
     result = TaskResultService.get_result_by_id(db, result_id)
     if not result:
         from fastapi import HTTPException

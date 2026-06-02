@@ -288,7 +288,7 @@ def add_node(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.services.group_service import add_group_node as _add
+    from app.contexts.shared.group_service import add_group_node as _add
     result = _add(db, group_id, payload.model_dump(exclude_unset=True), current_user, request)
     db.commit()
     return success(result)
@@ -302,7 +302,7 @@ def remove_node(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.services.group_service import remove_group_node as _remove
+    from app.contexts.shared.group_service import remove_group_node as _remove
     result = _remove(db, group_id, node_id, current_user, request)
     db.commit()
     return success(result)

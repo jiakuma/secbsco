@@ -94,7 +94,7 @@ class BridgeAuthPort(AuthPort):
 
     def authenticate(self, username: str, password: str, db: Session = None) -> User | None:
         session = db or self._db
-        from app.services.auth_service import AuthService
+        from app.contexts.shared.auth_service import AuthService
         orm = AuthService.authenticate_user(session, username, password)
         return _to_domain(orm) if orm else None
 
@@ -112,42 +112,42 @@ class BridgeAccessControlPort(AccessControlPort):
         self._db = db
 
     def get_user_context(self, user_id: int) -> dict:
-        from app.services.access_control_service import get_user_context
+        from app.contexts.shared.access_control_service import get_user_context
         return get_user_context(self._db, user_id)
 
     def get_accessible_group_ids(self, user_id: int) -> list[int] | None:
-        from app.services.access_control_service import get_accessible_group_ids
+        from app.contexts.shared.access_control_service import get_accessible_group_ids
         return get_accessible_group_ids(self._db, user_id)
 
     def check_group_admin_access(self, user_id: int, group_id: int) -> None:
-        from app.services.access_control_service import check_group_admin_access
+        from app.contexts.shared.access_control_service import check_group_admin_access
         check_group_admin_access(self._db, user_id, group_id)
 
     def is_platform_admin(self, user_id: int) -> bool:
-        from app.services.access_control_service import is_platform_admin
+        from app.contexts.shared.access_control_service import is_platform_admin
         return is_platform_admin(self._db, user_id)
 
     def get_manageable_agency_ids(self, current_user) -> list[int] | None:
-        from app.services.resource_permission_service import get_manageable_agency_ids
+        from app.contexts.shared.resource_permission_service import get_manageable_agency_ids
         return get_manageable_agency_ids(self._db, current_user)
 
     def require_agency_in_scope(self, current_user, agency_id: int) -> None:
-        from app.services.resource_permission_service import require_agency_in_scope
+        from app.contexts.shared.resource_permission_service import require_agency_in_scope
         require_agency_in_scope(self._db, current_user, agency_id)
 
     def check_can_manage_user(self, current_user, target_user_id: int) -> None:
-        from app.services.resource_permission_service import check_can_manage_user
+        from app.contexts.shared.resource_permission_service import check_can_manage_user
         check_can_manage_user(self._db, current_user, target_user_id)
 
 
 class BridgeAuditLogPort(AuditLogPort):
     def write_operate_log(self, *, db, user_id, username, operation_type, resource_type=None, resource_id=None, agency_id=None, group_id=None, request=None) -> None:
-        from app.services.access_control_service import write_operate_log
+        from app.contexts.shared.access_control_service import write_operate_log
         write_operate_log(db=db, user_id=user_id, username=username, operation_type=operation_type,
                           resource_type=resource_type, resource_id=resource_id, agency_id=agency_id, group_id=group_id, request=request)
 
     def anchor_resource_operation(self, db, *, resource_type, resource_id, operation_type, operator, agency_id=None, before_data=None, after_data=None):
-        from app.services.resource_chain_service import anchor_resource_operation
+        from app.contexts.shared.resource_chain_service import anchor_resource_operation
         return anchor_resource_operation(db, resource_type=resource_type, resource_id=resource_id,
                                         operation_type=operation_type, operator=operator,
                                         agency_id=agency_id, before_data=before_data, after_data=after_data)
@@ -155,7 +155,7 @@ class BridgeAuditLogPort(AuditLogPort):
 
 class BridgeMenuPort(MenuPort):
     def get_menus_for_roles(self, roles: list[dict]) -> list[dict]:
-        from app.services.menu_service import get_menus_for_roles
+        from app.contexts.shared.menu_service import get_menus_for_roles
         return get_menus_for_roles(roles)
 
 

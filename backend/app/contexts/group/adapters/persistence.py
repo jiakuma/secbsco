@@ -176,12 +176,12 @@ class BridgeGroupNodeRepository(GroupNodeRepository):
         self._current_user = user
 
     def list_nodes(self, group_id: int, node_type=None, node_usage_role=None, auth_status=None) -> list[dict]:
-        from app.services.group_service import list_group_nodes as _list
+        from app.contexts.shared.group_service import list_group_nodes as _list
         items = _list(self._db, group_id, self._current_user, node_type=node_type, node_usage_role=node_usage_role, auth_status=auth_status)
         return items if isinstance(items, list) else []
 
     def list_available_nodes(self, group_id: int, visible_agency_ids=None) -> list[dict]:
-        from app.services.group_service import list_available_group_nodes as _list
+        from app.contexts.shared.group_service import list_available_group_nodes as _list
         return _list(self._db, group_id, self._current_user) or []
 
     def get_node_auth(self, group_id: int, node_id: int) -> GroupNodeAuth | None:
@@ -353,27 +353,27 @@ class BridgeAccessControlPort(AccessControlPort):
         self._db = db
 
     def get_accessible_group_ids(self, current_user) -> list[int] | None:
-        from app.services.access_control_service import get_accessible_group_ids
+        from app.contexts.shared.access_control_service import get_accessible_group_ids
         return get_accessible_group_ids(self._db, current_user.id)
 
     def check_group_access(self, current_user, group_id: int) -> None:
-        from app.services.access_control_service import check_group_access
+        from app.contexts.shared.access_control_service import check_group_access
         check_group_access(self._db, current_user.id, group_id)
 
     def check_group_admin_access(self, current_user, group_id: int) -> None:
-        from app.services.access_control_service import check_group_admin_access
+        from app.contexts.shared.access_control_service import check_group_admin_access
         check_group_admin_access(self._db, current_user.id, group_id)
 
     def is_platform_admin(self, user_id: int) -> bool:
-        from app.services.access_control_service import is_platform_admin
+        from app.contexts.shared.access_control_service import is_platform_admin
         return is_platform_admin(self._db, user_id)
 
     def is_agency_admin(self, user_id: int) -> bool:
-        from app.services.access_control_service import is_agency_admin
+        from app.contexts.shared.access_control_service import is_agency_admin
         return is_agency_admin(self._db, user_id)
 
     def get_visible_agency_ids(self, current_user) -> list[int] | None:
-        from app.services.access_control_service import is_platform_admin, is_agency_admin
+        from app.contexts.shared.access_control_service import is_platform_admin, is_agency_admin
         if is_platform_admin(self._db, current_user.id):
             return None
         user_agency_id = current_user.agency_id
@@ -392,17 +392,17 @@ class BridgeAccessControlPort(AccessControlPort):
         return agency_ids
 
     def can_approve_group(self, current_user, group) -> bool:
-        from app.services.access_control_service import can_approve_group
+        from app.contexts.shared.access_control_service import can_approve_group
         return can_approve_group(self._db, current_user.id, group)
 
     def find_common_parent_agency(self, agency_id_1: int, agency_id_2: int) -> int | None:
-        from app.services.access_control_service import find_common_parent_agency
+        from app.contexts.shared.access_control_service import find_common_parent_agency
         return find_common_parent_agency(self._db, agency_id_1, agency_id_2)
 
 
 class BridgeAuditLogPort(AuditLogPort):
     def write_operate_log(self, *, db, user_id, username, operation_type, resource_type=None, resource_id=None, agency_id=None, group_id=None, request=None) -> None:
-        from app.services.access_control_service import write_operate_log
+        from app.contexts.shared.access_control_service import write_operate_log
         write_operate_log(db=db, user_id=user_id, username=username, operation_type=operation_type,
                           resource_type=resource_type, resource_id=resource_id, agency_id=agency_id, group_id=group_id, request=request)
 
@@ -424,19 +424,19 @@ class BridgeUserQueryPort(UserQueryPort):
         self._current_user = user
 
     def list_group_users(self, group_id: int) -> list[dict]:
-        from app.services.group_service import list_group_users as _list
+        from app.contexts.shared.group_service import list_group_users as _list
         return _list(self._db, group_id, self._current_user) or []
 
     def add_group_user(self, group_id: int, user_id: int, role_code: str, current_user) -> dict:
-        from app.services.group_service import add_group_user as _add
+        from app.contexts.shared.group_service import add_group_user as _add
         return _add(self._db, group_id, {"user_id": user_id, "role_code": role_code}, current_user)
 
     def update_group_user_role(self, group_id: int, user_id: int, role_code: str, current_user) -> dict:
-        from app.services.group_service import update_group_user_role as _update
+        from app.contexts.shared.group_service import update_group_user_role as _update
         return _update(self._db, group_id, user_id, {"role_code": role_code}, current_user)
 
     def remove_group_user(self, group_id: int, user_id: int, current_user) -> dict:
-        from app.services.group_service import remove_group_user as _remove
+        from app.contexts.shared.group_service import remove_group_user as _remove
         return _remove(self._db, group_id, user_id, current_user)
 
 
@@ -459,5 +459,5 @@ class BridgeLifecycleLogRepository(LifecycleLogRepository):
         self._db = db
 
     def list_logs(self, group_id: int) -> list[dict]:
-        from app.services.group_lifecycle_service import GroupLifecycleService
+        from app.contexts.shared.group_lifecycle_service import GroupLifecycleService
         return GroupLifecycleService.list_lifecycle_logs(self._db, group_id) or []

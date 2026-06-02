@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.models.sys_user import SysUser
-from app.services.auth_service import AuthService
+from app.contexts.shared.auth_service import AuthService
 
 
 bearer_scheme = HTTPBearer(auto_error=False)

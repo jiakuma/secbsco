@@ -164,11 +164,11 @@ class BridgeAccessControlPort(AccessControlPort):
         self._db = db
 
     def get_accessible_group_ids(self, user_id: int) -> list[int] | None:
-        from app.services.access_control_service import get_accessible_group_ids
+        from app.contexts.shared.access_control_service import get_accessible_group_ids
         return get_accessible_group_ids(self._db, user_id)
 
     def check_task_access(self, current_user, task_id: int) -> None:
-        from app.services.access_control_service import check_group_access
+        from app.contexts.shared.access_control_service import check_group_access
         from app.models.task import Task as TaskORM
         task = self._db.query(TaskORM).filter(TaskORM.id == task_id).first()
         if not task or not task.group_id:
@@ -176,13 +176,13 @@ class BridgeAccessControlPort(AccessControlPort):
         check_group_access(self._db, current_user.id, task.group_id)
 
     def check_task_run_access(self, current_user, task_id: int) -> None:
-        from app.services.access_control_service import check_task_run_access
+        from app.contexts.shared.access_control_service import check_task_run_access
         check_task_run_access(self._db, current_user, task_id)
 
 
 class BridgeAuditLogPort(AuditLogPort):
     def write_operate_log(self, *, db, user_id, username, operation_type, resource_type=None, resource_id=None, agency_id=None, group_id=None, request=None) -> None:
-        from app.services.access_control_service import write_operate_log
+        from app.contexts.shared.access_control_service import write_operate_log
         write_operate_log(db=db, user_id=user_id, username=username, operation_type=operation_type,
                           resource_type=resource_type, resource_id=resource_id,
                           agency_id=agency_id, group_id=group_id, request=request)

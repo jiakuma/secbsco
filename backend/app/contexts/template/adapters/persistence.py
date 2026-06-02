@@ -91,7 +91,7 @@ class BridgeAccessControlPort(AccessControlPort):
         self._db = db
 
     def get_visible_agency_ids(self, current_user) -> list[int] | None:
-        from app.services.access_control_service import is_platform_admin, is_agency_admin
+        from app.contexts.shared.access_control_service import is_platform_admin, is_agency_admin
         if is_platform_admin(self._db, current_user.id):
             return None
         user_agency_id = current_user.agency_id
@@ -112,7 +112,7 @@ class BridgeAccessControlPort(AccessControlPort):
         return agency_ids
 
     def check_template_access(self, current_user, template, require_write: bool = False) -> None:
-        from app.services.access_control_service import is_platform_admin, is_agency_admin, is_ancestor_agency
+        from app.contexts.shared.access_control_service import is_platform_admin, is_agency_admin, is_ancestor_agency
         from fastapi import HTTPException
         if is_platform_admin(self._db, current_user.id):
             return
@@ -127,7 +127,7 @@ class BridgeAccessControlPort(AccessControlPort):
         raise HTTPException(status_code=403, detail="无权访问该模板")
 
     def require_admin(self, current_user) -> None:
-        from app.services.access_control_service import is_platform_admin, is_agency_admin
+        from app.contexts.shared.access_control_service import is_platform_admin, is_agency_admin
         from fastapi import HTTPException
         if not is_platform_admin(self._db, current_user.id) and not is_agency_admin(self._db, current_user.id):
             raise HTTPException(status_code=403, detail="需要管理员权限")

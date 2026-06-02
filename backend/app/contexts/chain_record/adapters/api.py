@@ -5,20 +5,23 @@ from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.sys_user import SysUser
 from app.utils.response import success
-from .persistence import SQLAlchemyChainRecordRepository, BridgeRelatedTaskPort
+from .persistence import (
+    SQLAlchemyChainRecordRepository, BridgeRelatedTaskPort,
+    BridgeTaskResultLookupPort, BridgeAuditLogLookupPort,
+    build_record_info, build_result_info, build_log_info,
+)
 from ..application.use_cases import ListChainRecordsUseCase, GetChainRecordUseCase
 
 
 router = APIRouter(tags=["链上存证管理"])
 
 
-def _build_record_info_with_related_task(db: Session, record) -> dict:
-    from app.services.chain_record_service import ChainRecordService
-    from app.api.chain_record_api import _build_related_task_info
-    data = ChainRecordService.build_record_info(record)
-    related_task = _build_related_task_info(db=db, record=record)
-    data["related_task"] = related_task
-    data["related_task_id"] = related_task.get("task_id") if related_task else None
+def _build_record_info_with_related_task(db: Session, record, related_port: BridgeRelatedTaskPort) -> dict:
+    data = build_record_info(record)
+    related_task = related_port.build_related_task(record.biz_type, record.biz_id)
+    related_dict = asdict(related_task) if related_task else None
+    data["related_task"] = related_dict
+    data["related_task_id"] = related_task.task_id if related_task else None
     return data
 
 
@@ -58,16 +61,15 @@ def anchor_task_result(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.services.task_result_service import TaskResultService
-    from app.services.chain_record_service import ChainRecordService
-    result = TaskResultService.get_result_by_id(db=db, result_id=result_id)
+    repo = SQLAlchemyChainRecordRepository(db)
+    related_port = BridgeRelatedTaskPort(db)
+    result_lookup = BridgeTaskResultLookupPort(db)
+    result = result_lookup.get_by_id(result_id)
     if not result:
         raise HTTPException(status_code=404, detail="任务结果不存在")
-    result_content = TaskResultService.build_result_info(result)
-    record = ChainRecordService.mock_anchor_content(
-        db=db, biz_type="task_result", biz_id=str(result_id), content=result_content,
-    )
-    return success(_build_record_info_with_related_task(db, record))
+    result_content = build_result_info(result)
+    record = repo.mock_anchor_content(biz_type="task_result", biz_id=str(result_id), content=result_content)
+    return success(_build_record_info_with_related_task(db, record, related_port))
 
 
 @router.post("/api/audit-logs/{log_id}/chain-anchor")
@@ -76,13 +78,12 @@ def anchor_audit_log(
     db: Session = Depends(get_db),
     current_user: SysUser = Depends(get_current_user),
 ):
-    from app.services.audit_log_service import AuditLogService
-    from app.services.chain_record_service import ChainRecordService
-    log = AuditLogService.get_log_by_id(db=db, log_id=log_id)
+    repo = SQLAlchemyChainRecordRepository(db)
+    related_port = BridgeRelatedTaskPort(db)
+    log_lookup = BridgeAuditLogLookupPort(db)
+    log = log_lookup.get_by_id(log_id)
     if not log:
         raise HTTPException(status_code=404, detail="审计日志不存在")
-    log_content = AuditLogService.build_log_info(log)
-    record = ChainRecordService.mock_anchor_content(
-        db=db, biz_type="audit_log", biz_id=str(log_id), content=log_content,
-    )
-    return success(_build_record_info_with_related_task(db, record))
+    log_content = build_log_info(log)
+    record = repo.mock_anchor_content(biz_type="audit_log", biz_id=str(log_id), content=log_content)
+    return success(_build_record_info_with_related_task(db, record, related_port))
