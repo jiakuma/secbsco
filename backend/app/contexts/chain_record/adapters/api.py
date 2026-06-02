@@ -37,9 +37,22 @@ def list_chain_records(
 ):
     repo = SQLAlchemyChainRecordRepository(db)
     related_port = BridgeRelatedTaskPort(db)
-    uc = ListChainRecordsUseCase(repo, related_port)
-    result = uc.execute(biz_type=biz_type, biz_id=biz_id, status=status, page=page, page_size=page_size)
-    return success(asdict(result))
+    total, items = repo.list_record_orms(
+        biz_type=biz_type,
+        biz_id=biz_id,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
+    return success({
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": [
+            _build_record_info_with_related_task(db, item, related_port)
+            for item in items
+        ],
+    })
 
 
 @router.get("/api/chain-records/{record_id}")
@@ -50,9 +63,10 @@ def get_chain_record(
 ):
     repo = SQLAlchemyChainRecordRepository(db)
     related_port = BridgeRelatedTaskPort(db)
-    uc = GetChainRecordUseCase(repo, related_port)
-    result = uc.execute(record_id)
-    return success(asdict(result))
+    record = repo.get_orm_by_id(record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="存证记录不存在")
+    return success(_build_record_info_with_related_task(db, record, related_port))
 
 
 @router.post("/api/task-results/{result_id}/chain-anchor")

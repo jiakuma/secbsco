@@ -20,10 +20,14 @@ class Settings(BaseSettings):
     # 当前 FastAPI 后端不直接连接 FISCO BCOS Python SDK，
     # 统一调用 Alice 节点上的 fisco_anchor_service。
     FISCO_ANCHOR_SERVICE_URL: str = "http://123.60.109.244:18080"
-    FISCO_ANCHOR_API_KEY: str = "bio-anchor-2026-test"
+    FISCO_ANCHOR_API_TOKEN: str = "bio-anchor-2026-test"  # 兼容旧名称
+    FISCO_ANCHOR_API_KEY: str = "bio-anchor-2026-test"    # 保持向后兼容
     FISCO_ANCHOR_TIMEOUT_SECONDS: int = 10
     FISCO_CHAIN_TYPE: str = "fisco_bcos"
     FISCO_CONTRACT_ADDRESS: str = "0x6849f21d1e455e9f0712b1e99fa4fcd23758e8f1"
+    
+    # 自动上链配置
+    AUTO_CHAIN_ANCHOR_ON_TASK_SUCCESS: bool = True
 
     # SecretFlow 联合统计服务配置
     # 当前 FastAPI 后端不直接运行 SecretFlow，统一调用 Alice 节点上的统计服务。

@@ -3,7 +3,7 @@
     <header class="page-header">
       <div class="title-area">
         <h1>区块链治理与审计大盘</h1>
-        <p>统一查看系统审计日志、分布式存证摘要与不可篡改的链上凭证</p>
+        <p>统一查看系统审计日志、FISCO BCOS 存证记录与链上校验凭证</p>
       </div>
 
       <div class="header-actions">
@@ -74,19 +74,19 @@
             </el-table>
           </el-tab-pane>
 
-          <el-tab-pane label="链上存证网络" name="chain">
+          <el-tab-pane label="链上存证记录" name="chain">
             <div class="chain-toolbar">
-              <el-select v-model="chainQuery.biz_type" placeholder="业务分类" clearable style="width: 160px">
+              <el-select v-model="chainQuery.biz_type" placeholder="业务类型" clearable style="width: 160px">
                 <el-option label="任务存证" value="task" />
-                <el-option label="结果存证" value="task_result" />
-                <el-option label="审计存证" value="audit_log" />
+                <el-option label="任务结果存证" value="task_result" />
+                <el-option label="审计日志存证" value="audit_log" />
               </el-select>
               <el-input v-model="chainQuery.biz_id" placeholder="业务ID" clearable style="width: 160px" class="mono-input" />
               <el-select v-model="chainQuery.status" placeholder="上链状态" clearable style="width: 140px">
-                <el-option label="存证成功" value="success" />
-                <el-option label="存证失败" value="failed" />
+                <el-option label="已上链" value="success" />
+                <el-option label="上链失败" value="failed" />
               </el-select>
-              <el-button type="primary" :icon="Search" @click="handleSearchChainRecords">检索链上记录</el-button>
+              <el-button type="primary" :icon="Search" @click="handleSearchChainRecords">检索存证记录</el-button>
               <el-button :icon="RefreshLeft" @click="handleResetChainRecords">重置</el-button>
             </div>
 
@@ -110,33 +110,79 @@
                 </template>
               </el-table-column>
 
-              <el-table-column label="底层链网络" width="160" align="center">
+              <el-table-column label="交易哈希" min-width="220">
                 <template #default="{ row }">
-                  <el-tag type="warning" effect="dark" size="small">{{ formatChainType(row.chain_type) }}</el-tag>
+                  <div class="hash-wrapper w-full" :class="{ 'muted-hash': !row.tx_hash }" title="点击复制" @click="copyText(row.tx_hash)">
+                    <el-icon class="hash-icon"><DocumentCopy /></el-icon>
+                    <span class="hash-text">{{ shortHash(row.tx_hash) }}</span>
+                  </div>
                 </template>
               </el-table-column>
 
-              <el-table-column label="状态" width="110" align="center">
+              <el-table-column label="区块高度" width="110" align="center">
                 <template #default="{ row }">
-                  <el-tag :type="getStatusTagType(row.status)" effect="dark">
-                    {{ formatStatus(row.status).toUpperCase() }}
+                  <span class="mono-text text-blue">{{ row.block_number ? `#${row.block_number}` : '-' }}</span>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="链网络" width="140" align="center">
+                <template #default="{ row }">
+                  <el-tag :type="isRealChainRecord(row) ? 'success' : 'warning'" effect="plain" size="small">
+                    {{ formatChainType(row.chain_type) }}
                   </el-tag>
                 </template>
               </el-table-column>
 
-              <el-table-column prop="created_at" label="上链时间" width="180" />
-
-              <el-table-column label="审计指令" width="280" fixed="right">
+              <el-table-column label="上链状态" width="110" align="center">
                 <template #default="{ row }">
-                  <el-button type="primary" link :icon="View" :loading="detailLoading && currentChainRecord?.id === row.id" @click="handleViewChainRecordDetail(row)">
-                    查看凭证
-                  </el-button>
-                  <el-button v-if="getRelatedTask(row)?.task_id" type="success" link :icon="DataBoard" @click="goTaskDetail(getRelatedTask(row)?.task_id)">
-                    追溯任务
-                  </el-button>
-                  <el-button type="warning" link :icon="Monitor" :loading="auditLinkLoading && currentAuditChainRecord?.id === row.id" @click="handleViewRelatedAuditLogs(row)">
-                    关联审计
-                  </el-button>
+                  <el-tag :type="getStatusTagType(row.status)" effect="dark">
+                    {{ formatStatus(row.status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="链上校验" width="110" align="center">
+                <template #default="{ row }">
+                  <el-tag :type="getVerifyTagType(row.verify_status)" effect="plain">
+                    {{ formatVerifyStatus(row.verify_status) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+
+              <el-table-column label="校验结果" width="130" align="center">
+                <template #default="{ row }">
+                  <el-tag :type="getConsistencyTagType(row)" effect="plain">
+                    {{ formatConsistencyResult(row) }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+
+              <el-table-column prop="created_at" label="存证时间" width="180" />
+
+              <el-table-column label="审计指令" width="190" fixed="right" align="center">
+                <template #default="{ row }">
+                  <div class="audit-action-row">
+                    <el-button
+                      class="audit-action-btn"
+                      type="primary"
+                      link
+                      :icon="View"
+                      :loading="detailLoading && currentChainRecord?.id === row.id"
+                      @click="handleViewChainRecordDetail(row)"
+                    >
+                      查看凭证
+                    </el-button>
+                    <el-button
+                      v-if="getRelatedTask(row)?.task_id"
+                      class="audit-action-btn"
+                      type="success"
+                      link
+                      :icon="DataBoard"
+                      @click="goTaskDetail(getRelatedTask(row)?.task_id)"
+                    >
+                      追溯任务
+                    </el-button>
+                  </div>
                 </template>
               </el-table-column>
             </el-table>
@@ -153,7 +199,7 @@
       <div v-if="currentChainRecord" class="detail-content">
         <div class="credential-summary">
           <div class="summary-item">
-            <div class="summary-label">保护对象</div>
+            <div class="summary-label">业务对象</div>
             <div class="summary-value">{{ formatBizType(currentChainRecord.biz_type) }} <span class="mono-text">#{{ currentChainRecord.biz_id || '-' }}</span></div>
           </div>
           <div class="summary-item">
@@ -175,8 +221,33 @@
 
         <el-alert class="detail-alert" :title="getCredentialTip(currentChainRecord)" type="info" show-icon :closable="false" />
 
-        <div class="detail-section-title">分布式节点共识回执</div>
+        <div class="detail-section-title">链上存证凭证</div>
         <div class="credential-grid">
+          <div class="credential-row">
+            <div class="credential-label">存证编号</div>
+            <div class="credential-value">{{ currentChainRecord.anchor_id || `record_${currentChainRecord.id}` }}</div>
+            <el-button link type="primary" :icon="DocumentCopy" @click="copyText(currentChainRecord.anchor_id || currentChainRecord.id)">复制</el-button>
+          </div>
+          <div class="credential-row">
+            <div class="credential-label">链网络</div>
+            <div class="credential-value">{{ formatChainType(currentChainRecord.chain_type) }}</div>
+          </div>
+          <div class="credential-row">
+            <div class="credential-label">校验状态</div>
+            <div class="credential-value">
+              <el-tag :type="getVerifyTagType(currentChainRecord.verify_status)" effect="plain">
+                {{ formatVerifyStatus(currentChainRecord.verify_status) }}
+              </el-tag>
+            </div>
+          </div>
+          <div class="credential-row">
+            <div class="credential-label">校验结果</div>
+            <div class="credential-value">
+              <el-tag :type="getConsistencyTagType(currentChainRecord)" effect="plain">
+                {{ formatConsistencyResult(currentChainRecord) }}
+              </el-tag>
+            </div>
+          </div>
           <div class="credential-row">
             <div class="credential-label">内容哈希</div>
             <div class="credential-value">{{ currentChainRecord.content_hash || '-' }}</div>
@@ -200,10 +271,22 @@
         </div>
 
         <div class="verify-box mt-4">
-          <div class="verify-item"><span class="verify-dot"></span><span>内容哈希 (Content Hash) 用于证明业务结果摘要或模型梯度未被篡改。</span></div>
-          <div class="verify-item"><span class="verify-dot"></span><span>交易哈希、区块高度和合约地址共同构成 FISCO BCOS 联盟链的绝对查询凭证。</span></div>
+          <div class="verify-item"><span class="verify-dot"></span><span>链上仅保存任务结果摘要哈希，不保存原始业务数据或明细记录。</span></div>
+          <div class="verify-item"><span class="verify-dot"></span><span>交易哈希、区块高度和合约地址共同构成 FISCO BCOS 联盟链查询凭证。</span></div>
           <div class="verify-item"><span class="verify-dot"></span><span class="text-blue">{{ getChainVerifyText(currentChainRecord) }}</span></div>
         </div>
+
+        <template v-if="currentChainRecord.verify_detail_json">
+          <div class="detail-section-title">链上返回详情</div>
+          <div class="fl-terminal-box">
+            <div class="terminal-header">
+              <div class="mac-dots"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+              <span class="terminal-title">fisco_anchor_response.json</span>
+              <el-button link class="copy-btn" @click="copyText(formatJson(currentChainRecord.verify_detail_json))">Copy</el-button>
+            </div>
+            <div class="terminal-body scrollable"><pre class="json-text">{{ formatJson(currentChainRecord.verify_detail_json) }}</pre></div>
+          </div>
+        </template>
 
         <template v-if="currentChainRecord.error_message">
           <div class="detail-section-title">异常回退信息</div>
@@ -364,15 +447,76 @@ function goTaskDetail(taskId: number | string | null | undefined) {
   chainDetailVisible.value = false; router.push(`/tasks/${taskId}`)
 }
 
-function formatBizType(type: string) { const map: Record<string, string> = { task: '任务调度配置', task_result: '协同计算结果', audit_log: '关键操作审计' }; return map[type] || type || '-' }
-function formatStatus(status: string) { const map: Record<string, string> = { success: '共识成功', failed: '共识失败', pending: '打包中' }; return map[status] || status || '-' }
-function formatChainType(type: string) { const map: Record<string, string> = { fisco_bcos: 'FISCO BCOS (联盟链)', mock_fisco_bcos: 'Mock FISCO (开发)' }; return map[type] || type || '-' }
-function getChainVerifyText(record: any) {
-  if (record?.chain_type === 'fisco_bcos') return '当前记录为 FISCO BCOS 真实链上存证，交易哈希、区块高度和合约地址均来自主网同步节点。'
-  if (record?.chain_type === 'mock_fisco_bcos') return '当前记录为历史开发测试网 Mock 存证，不具备法务审计效力。'
-  return '当前记录可通过链上哈希进行二次校对。'
+function formatBizType(type: string) { const map: Record<string, string> = { task: '任务存证', task_result: '任务结果存证', audit_log: '审计日志存证', resource_operation: '资源操作存证' }; return map[type] || type || '-' }
+function formatStatus(status: string) { const map: Record<string, string> = { success: '已上链', failed: '上链失败', pending: '待上链', skipped: '未启用' }; return map[status] || status || '-' }
+function formatChainType(type: string) { const map: Record<string, string> = { fisco_bcos: 'FISCO BCOS', mock_fisco_bcos: 'Mock FISCO', local: '本地预留' }; return map[type] || type || '-' }
+function isRealChainRecord(record: any) {
+  return record?.chain_type === 'fisco_bcos' && !!record?.tx_hash && !!record?.block_number
 }
-function getStatusTagType(status: string) { if (status === 'success') return 'success'; if (status === 'failed') return 'danger'; return 'info' }
+
+function getChainVerifyText(record: any) {
+  if (isChainConsistencyPassed(record)) {
+    return '当前记录已完成 FISCO BCOS 真实链上存证，链上摘要与系统存证摘要一致。'
+  }
+  if (record?.status === 'failed') return '当前记录上链失败，请查看异常回退信息并重新触发任务生成或上链流程。'
+  if (record?.chain_type === 'mock_fisco_bcos') return '当前记录为历史 Mock 存证，仅用于开发联调，不作为真实链上凭证。'
+  return '当前记录可通过内容哈希、交易哈希和区块高度进行二次核对。'
+}
+
+function getStatusTagType(status: string) { if (status === 'success') return 'success'; if (status === 'failed') return 'danger'; if (status === 'pending') return 'warning'; return 'info' }
+function formatVerifyStatus(status: string) { const map: Record<string, string> = { success: '校验通过', failed: '校验失败', pending: '待校验' }; return map[status] || '-' }
+function getVerifyTagType(status: string) { if (status === 'success') return 'success'; if (status === 'failed') return 'danger'; return 'info' }
+
+function getVerifyDetail(record: any) {
+  const detail = record?.verify_detail_json
+  if (!detail) return {}
+  if (typeof detail === 'string') {
+    try { return JSON.parse(detail) } catch { return {} }
+  }
+  return typeof detail === 'object' ? detail : {}
+}
+
+function getChainResultArray(record: any) {
+  const detail = getVerifyDetail(record)
+  return Array.isArray(detail?.chain_result) ? detail.chain_result : []
+}
+
+function isChainConsistencyPassed(record: any) {
+  if (!record || record.status !== 'success' || record.verify_status !== 'success') return false
+  const chainResult = getChainResultArray(record)
+
+  // 列表接口如果暂未返回 verify_detail_json，则先按链上校验状态和真实交易凭证判断为已校验。
+  if (chainResult.length === 0) return isRealChainRecord(record)
+
+  const chainAnchorId = chainResult[0] ? String(chainResult[0]) : ''
+  const chainDigest = chainResult[1] ? String(chainResult[1]) : ''
+  const localAnchorId = record.anchor_id ? String(record.anchor_id) : ''
+  const localDigest = record.content_hash ? String(record.content_hash) : ''
+
+  const digestMatched = !!localDigest && !!chainDigest && localDigest === chainDigest
+  const anchorMatched = !localAnchorId || !chainAnchorId || localAnchorId === chainAnchorId
+  return digestMatched && anchorMatched
+}
+
+function formatConsistencyResult(record: any) {
+  if (!record) return '-'
+  if (record.status === 'failed') return '上链失败'
+  if (record.status === 'pending') return '待上链'
+  if (record.status === 'skipped') return '未上链'
+  if (record.verify_status === 'failed') return '不一致'
+  if (record.verify_status === 'pending') return '待校验'
+  if (isChainConsistencyPassed(record)) return '一致'
+  if (record.status === 'success') return '待校验'
+  return '-'
+}
+
+function getConsistencyTagType(record: any) {
+  const result = formatConsistencyResult(record)
+  if (result === '一致') return 'success'
+  if (result === '不一致' || result === '上链失败') return 'danger'
+  if (result === '待校验' || result === '待上链') return 'warning'
+  return 'info'
+}
 
 function shortHash(value: string | null | undefined) {
   if (!value) return '-'
@@ -382,9 +526,10 @@ function shortHash(value: string | null | undefined) {
 
 function getCredentialTip(record: any) {
   const bizType = record?.biz_type
-  if (bizType === 'task_result') return '该凭证由底层的可信执行环境（TEE）或联邦安全聚合器签发，用于证明多方计算结果（如 AUC/Accuracy）的真实性，防止单方面篡改。'
-  if (bizType === 'task') return '该凭证冻结了联合任务启动时的网络拓扑和调度参数配置，一旦上链，任何机构无法抵赖其参与度。'
-  return '该凭证记录了系统内的关键授权或变更操作，用于事后审计和追责。'
+  if (bizType === 'task_result') return '该凭证由任务执行成功后自动生成，FISCO BCOS 链上保存结果摘要哈希，用于证明任务结果未被篡改。'
+  if (bizType === 'task') return '该凭证用于记录任务创建或调度配置摘要，便于后续追溯任务来源。'
+  if (bizType === 'resource_operation') return '该凭证记录节点、数据、模板等资源操作摘要，用于后续审计追责。'
+  return '该凭证记录系统关键操作摘要，用于事后审计和一致性核对。'
 }
 
 function formatOperationType(type: string) {
@@ -490,4 +635,23 @@ onMounted(() => { loadAll() })
 .audit-link-summary { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 16px; padding: 16px; border: 1px solid #e5e7eb; border-radius: 8px; background: #ffffff; color: #1f2937; font-size: 14px; }
 .audit-link-label { color: #8a96a8; font-weight: 600;}
 .audit-expand { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 12px 24px; background: #f9fafc; border-top: 1px dashed #ebeef5; border-bottom: 1px dashed #ebeef5;}
+
+/* 审计指令按钮：同一行展示，避免上下换行 */
+.audit-action-row {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  white-space: nowrap;
+  width: 100%;
+}
+.audit-action-row :deep(.el-button) {
+  margin-left: 0;
+}
+.audit-action-btn {
+  padding: 0;
+}
+
+.muted-hash { color: #9ca3af; cursor: default; }
+
 </style>

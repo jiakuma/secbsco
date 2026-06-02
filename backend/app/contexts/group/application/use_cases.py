@@ -347,9 +347,17 @@ class ListVisibleGroupsForTaskUseCase:
     def execute(self, current_user) -> list[dict]:
         accessible_ids = self._access_control.get_accessible_group_ids(current_user)
         if accessible_ids is None:
+            # 平台管理员可以看到所有状态的群组
             groups, _ = self._repo.list_groups(page=1, page_size=10000)
+            return [{"id": g.id, "group_name": g.group_name, "status": g.status} for g in groups]
         elif not accessible_ids:
             return []
         else:
+            # 对于治理员和其他用户，显示所有可访问的群组（包括非active状态）
             groups, _ = self._repo.list_groups(accessible_ids=accessible_ids, page=1, page_size=10000)
-        return [{"id": g.id, "group_name": g.group_name, "status": g.status} for g in groups if g.status == "active"]
+            # 过滤掉deleted/archived状态的群组，但保留active/configuring/draft
+            return [
+                {"id": g.id, "group_name": g.group_name, "status": g.status} 
+                for g in groups 
+                if g.status in ["active", "configuring", "draft"]
+            ]

@@ -50,7 +50,76 @@ def _to_jsonable(value: Any):
     return value
 
 
+def _safe_verify_detail(value: Any) -> dict:
+    """
+    兼容 verify_detail_json 可能为 dict / str / None 的情况。
+    """
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            data = json.loads(value)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _chain_result_array(record: ChainRecordORM) -> list:
+    detail = _safe_verify_detail(getattr(record, "verify_detail_json", None))
+    chain_result = detail.get("chain_result")
+    return chain_result if isinstance(chain_result, list) else []
+
+
+def build_consistency_result(record: ChainRecordORM) -> str:
+    """
+    构造链上摘要与系统摘要的一致性结论。
+
+    规则：
+    1. 上链失败 / 待上链 / 未启用优先返回状态类结论；
+    2. status=success 且 verify_status=success 时，若存在 verify_detail_json.chain_result，
+       则比对 anchor_id 与 content_hash；
+    3. 如果列表接口暂未携带链上详情，但已具备真实 tx_hash、block_number、verify_status=success，
+       则视为“已校验一致”。
+    """
+    status = getattr(record, "status", None)
+    verify_status = getattr(record, "verify_status", None)
+
+    if status == "failed":
+        return "上链失败"
+    if status == "pending":
+        return "待上链"
+    if status == "skipped":
+        return "未上链"
+    if verify_status == "failed":
+        return "不一致"
+    if verify_status == "pending":
+        return "待校验"
+
+    if status == "success" and verify_status == "success":
+        chain_result = _chain_result_array(record)
+        if chain_result:
+            chain_anchor_id = str(chain_result[0]) if len(chain_result) > 0 and chain_result[0] is not None else ""
+            chain_digest = str(chain_result[1]) if len(chain_result) > 1 and chain_result[1] is not None else ""
+            local_anchor_id = str(getattr(record, "anchor_id", None) or "")
+            local_digest = str(getattr(record, "content_hash", None) or "")
+
+            digest_matched = bool(local_digest and chain_digest and local_digest == chain_digest)
+            anchor_matched = (not local_anchor_id) or (not chain_anchor_id) or local_anchor_id == chain_anchor_id
+            return "一致" if digest_matched and anchor_matched else "不一致"
+
+        if getattr(record, "tx_hash", None) and getattr(record, "block_number", None):
+            return "一致"
+
+    if status == "success":
+        return "待校验"
+    return "-"
+
+
 def build_record_info(record: ChainRecordORM) -> dict:
+    verify_detail = getattr(record, "verify_detail_json", None)
     return {
         "id": record.id,
         "biz_type": record.biz_type,
@@ -63,8 +132,20 @@ def build_record_info(record: ChainRecordORM) -> dict:
         "status": record.status,
         "error_message": record.error_message,
         "created_at": record.created_at,
+        "anchor_id": getattr(record, "anchor_id", None),
+        "group_id": getattr(record, "group_id", None),
+        "agency_id": getattr(record, "agency_id", None),
+        "task_id": getattr(record, "task_id", None),
+        "result_id": getattr(record, "result_id", None),
+        "dataset_id": getattr(record, "dataset_id", None),
+        "contract_name": getattr(record, "contract_name", None),
+        "contract_version": getattr(record, "contract_version", None),
+        "verify_status": getattr(record, "verify_status", None),
+        "last_verify_time": getattr(record, "last_verify_time", None),
+        "verify_detail_json": _safe_verify_detail(verify_detail) if verify_detail else None,
+        "updated_at": getattr(record, "updated_at", None),
+        "consistency_result": build_consistency_result(record),
     }
-
 
 def build_result_info(result: TaskResultORM) -> dict:
     return {
@@ -110,6 +191,37 @@ def generate_mock_tx_hash(biz_type: str, biz_id: str, content_hash: str) -> str:
 class SQLAlchemyChainRecordRepository(ChainRecordRepository):
     def __init__(self, db: Session):
         self._db = db
+
+    def _base_query(self):
+        return self._db.query(ChainRecordORM)
+
+    def list_record_orms(
+        self,
+        biz_type: Optional[str] = None,
+        biz_id: Optional[str] = None,
+        status: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> tuple[int, list[ChainRecordORM]]:
+        query = self._base_query()
+        if biz_type:
+            query = query.filter(ChainRecordORM.biz_type == biz_type)
+        if biz_id:
+            query = query.filter(ChainRecordORM.biz_id == biz_id)
+        if status:
+            query = query.filter(ChainRecordORM.status == status)
+        total = query.count()
+        items = (
+            query
+            .order_by(ChainRecordORM.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return total, items
+
+    def get_orm_by_id(self, record_id: int) -> Optional[ChainRecordORM]:
+        return self._base_query().filter(ChainRecordORM.id == record_id).first()
 
     def list_records(
         self,

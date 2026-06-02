@@ -1,5 +1,8 @@
+# application/dtos.py
+
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Optional
 
 
 @dataclass
@@ -7,18 +10,18 @@ class AgencyDTO:
     id: int
     agency_code: str
     agency_name: str
-    agency_type: str | None = None
-    agency_level: str | None = None
-    parent_agency_id: int | None = None
-    parent_agency_name: str | None = None
-    region_code: str | None = None
-    region_name: str | None = None
-    contact_person: str | None = None
-    contact_phone: str | None = None
+    agency_type: Optional[str] = None
+    agency_level: Optional[str] = None
+    parent_agency_id: Optional[int] = None
+    parent_agency_name: Optional[str] = None
+    region_code: Optional[str] = None
+    region_name: Optional[str] = None
+    contact_person: Optional[str] = None
+    contact_phone: Optional[str] = None
     status: str = "active"
-    description: str | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
+    description: Optional[str] = None
+    created_at: Optional[datetime] = None   # 保持 datetime
+    updated_at: Optional[datetime] = None   # 保持 datetime
     summary: dict = field(default_factory=dict)
 
 
@@ -28,9 +31,9 @@ class AgencyTreeDTO:
     label: str
     agency_code: str
     agency_name: str
-    agency_level: str | None = None
-    agency_type: str | None = None
-    parent_agency_id: int | None = None
+    agency_level: Optional[str] = None
+    agency_type: Optional[str] = None
+    parent_agency_id: Optional[int] = None
     status: str = "active"
     children: list = field(default_factory=list)
 

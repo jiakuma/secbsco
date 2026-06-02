@@ -1,5 +1,6 @@
 from datetime import datetime
 from .enums import AgencyStatus
+from .exceptions import InvalidAgencyStatus, NoFieldsToUpdate
 
 
 class Agency:
@@ -44,20 +45,23 @@ class Agency:
 
     def enable(self) -> None:
         self._status = AgencyStatus.ACTIVE.value
+        self.updated_at = datetime.now()
 
     def disable(self) -> None:
         self._status = AgencyStatus.DISABLED.value
+        self.updated_at = datetime.now()
 
     def set_status(self, status: str) -> None:
         if status not in (AgencyStatus.ACTIVE.value, AgencyStatus.DISABLED.value):
-            from .exceptions import InvalidAgencyStatus
             raise InvalidAgencyStatus()
         self._status = status
+        self.updated_at = datetime.now()
 
     def update_fields(self, **fields) -> None:
         updatable = [
             "agency_name", "agency_type", "agency_level", "parent_agency_id",
-            "region_code", "region_name", "contact_person", "contact_phone", "description",
+            "region_code", "region_name",
+            "contact_person", "contact_phone", "description",
         ]
         changed = False
         for f in updatable:
@@ -65,6 +69,5 @@ class Agency:
                 setattr(self, f, fields[f])
                 changed = True
         if not changed:
-            from .exceptions import NoFieldsToUpdate
             raise NoFieldsToUpdate()
         self.updated_at = datetime.now()

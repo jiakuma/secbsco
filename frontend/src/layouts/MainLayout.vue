@@ -123,7 +123,7 @@ const userMenus: SidebarMenuItem[] = [
 
 const governorMenus: SidebarMenuItem[] = [
   { title: '任务管理', path: '/tasks', icon: '▣' },
-  { title: '可信审计管理', path: '/audit', icon: '▨' },
+  { title: '区块链治理', path: '/blockchain', icon: '🔗' },
 ]
 
 const currentTitle = computed(() => {
@@ -161,6 +161,7 @@ const activeMenu = computed(() => {
     '/tasks/': '/tasks',
     '/audit': '/audit',
     '/audit/': '/audit',
+    '/blockchain': '/blockchain',
   }
 
   for (const [prefix, menuPath] of Object.entries(prefixMap)) {
